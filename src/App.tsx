@@ -1,11 +1,10 @@
 // @ts-nocheck
-// P.3 理財數學王 v5.4 (Data Analytics & CSV Report)
+// P.3 理財數學王 v5.5 (Score Accumulation Display)
 // Date: 2026-01-14
 // Fixes: 
-// 1. Student View: Added realtime counters for Correct (✅) and Wrong (❌) answers.
-// 2. Teacher View: Added CSV Export with detailed analysis (Accuracy, Weakness detection).
-// 3. Backend: Tracking specific error types (mul, div, app, logic) for analysis generation.
-// 4. Reset function now clears all analytic data.
+// 1. Explicitly labeled the score display as "Total (累積)" in the Game View to encourage accumulation.
+// 2. Increased font size for Timer and Score for better visibility on iPad.
+// 3. Added "Time (時間)" label.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -617,7 +616,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.4</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.5</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -718,11 +717,13 @@ const App = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-rose-100 p-4 rounded-2xl flex flex-col items-center justify-center text-rose-700">
                       <Timer size={32} className="mb-1"/>
-                      <span className="text-2xl font-black">{Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</span>
+                      <span className="text-3xl font-black">{Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</span>
+                      <span className="text-xs font-bold">Time (時間)</span>
                     </div>
                     <div className="bg-orange-100 p-4 rounded-2xl flex flex-col items-center justify-center text-orange-700">
                       <Coins size={32} className="mb-1"/>
-                      <span className="text-2xl font-black">{totalAccumulatedScore}</span>
+                      <span className="text-3xl font-black">{totalAccumulatedScore}</span>
+                      <span className="text-xs font-bold">Total (累積)</span>
                     </div>
                   </div>
 
