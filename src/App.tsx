@@ -1,8 +1,10 @@
 // @ts-nocheck
-// P.3 理財數學王 v4.4 (Force Landscape Layout)
+// P.3 理財數學王 v4.5 (Blank Screen Fix)
 // Date: 2026-01-14
-// Fixes: Enforced Grid/Flex rows for ALL views to prevent vertical stacking on iPad.
-// Optimized for iPad Landscape (1024px+).
+// Fixes: 
+// 1. Added loading guard in Play view to prevent blank screen if currentQuestion is null.
+// 2. Fixed CSS height collapse issue in Intro view (changed h-full to flex-grow).
+// 3. Consolidated view switching logic.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -11,7 +13,7 @@ import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTim
 import { 
   Trophy, User, Coins, ArrowLeft, CheckCircle2, XCircle, 
   Calculator, Store, Wallet, Lock, Settings, LogOut, 
-  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle
+  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -304,7 +306,13 @@ const App = () => {
     setSessionScore(0);
     setStrikes(0);
     setTimeLeft(GAME_DURATION);
-    setCurrentQuestion(generateQuestion(difficulty));
+    
+    // Generate question FIRST
+    const q = generateQuestion(difficulty);
+    setCurrentQuestion(q);
+    
+    // Switch view LAST to prevent "blank screen" race condition
+    setStudentView('play');
     
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id);
     
@@ -412,7 +420,7 @@ const App = () => {
     <div className="h-screen w-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4 overflow-hidden">
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.4</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.5</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       {/* FORCE GRID 3 COLS for Landscape */}
@@ -440,7 +448,8 @@ const App = () => {
           <h2 className="font-bold">比賽專區 (Student Zone)</h2>
           <div className="w-6"></div>
         </div>
-        <div className="p-6 flex-grow overflow-y-auto">
+        {/* Fix: Added flex flex-col to parent so children flex-grow works properly */}
+        <div className="p-6 flex-grow overflow-y-auto flex flex-col">
            {studentView === 'class_select' && (
             <div className="grid grid-cols-4 gap-6 h-full items-center">
               {['3A','3B','3C','3D'].map(c => <button key={c} onClick={() => {setSelectedClass(c); setStudentView('name_select');}} className="h-64 bg-orange-50 hover:bg-orange-500 hover:text-white rounded-3xl text-6xl font-black border-4 border-orange-100 transition-colors shadow-sm">{c}</button>)}
@@ -461,7 +470,7 @@ const App = () => {
           )}
 
           {studentView === 'difficulty' && (
-            <div className="h-full flex flex-col justify-center items-center space-y-6">
+            <div className="flex-grow flex flex-col justify-center items-center space-y-6">
               <h3 className="text-3xl font-black">選擇挑戰難度</h3>
               <div className="grid grid-cols-3 gap-8 w-full max-w-6xl">
                 <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="p-12 bg-green-100 border-4 border-green-300 rounded-3xl text-3xl font-black text-green-800 hover:scale-105 transition-transform shadow-lg">
@@ -478,48 +487,55 @@ const App = () => {
           )}
 
           {studentView === 'intro' && (
-            <div className="h-full flex flex-col justify-center items-center space-y-8">
+            // Fix: Changed h-full to flex-grow for robust centering
+            <div className="flex-grow flex flex-col justify-center items-center space-y-8">
               <h2 className="text-7xl font-black text-slate-800">Ready?</h2>
               <p className="text-3xl font-bold text-slate-500">5 分鐘限時挑戰！<br/>答錯 3 次會扣分喔！</p>
-              <button onClick={() => {setStudentView('play'); startGame();}} className="px-20 py-8 bg-orange-500 text-white rounded-full text-5xl font-black animate-pulse shadow-xl hover:scale-105 transition-transform"><Play size={48} fill="currentColor" className="inline mr-3"/> START</button>
+              <button onClick={startGame} className="px-20 py-8 bg-orange-500 text-white rounded-full text-5xl font-black animate-pulse shadow-xl hover:scale-105 transition-transform"><Play size={48} fill="currentColor" className="inline mr-3"/> START</button>
             </div>
           )}
 
           {/* GAME VIEW - LANDSCAPE SPLIT SCREEN */}
-          {studentView === 'play' && currentQuestion && (
-            <div className="flex flex-row gap-6 h-full items-stretch">
-              {/* Left Column: Question */}
-              <div className="w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
-                {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
-                <p className="text-6xl lg:text-8xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
+          {studentView === 'play' && (
+            !currentQuestion ? (
+              <div className="flex-grow flex items-center justify-center">
+                <Loader2 className="animate-spin text-orange-500" size={64} />
               </div>
-
-              {/* Right Column: Controls */}
-              <div className="w-1/3 flex flex-col gap-4">
-                {/* Stats */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-rose-100 p-4 rounded-2xl flex flex-col items-center justify-center text-rose-700">
-                    <Timer size={32} className="mb-1"/>
-                    <span className="text-2xl font-black">{Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</span>
-                  </div>
-                  <div className="bg-orange-100 p-4 rounded-2xl flex flex-col items-center justify-center text-orange-700">
-                    <Coins size={32} className="mb-1"/>
-                    <span className="text-2xl font-black">{totalAccumulatedScore}</span>
-                  </div>
+            ) : (
+              <div className="flex flex-row gap-6 h-full items-stretch">
+                {/* Left Column: Question */}
+                <div className="w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
+                  {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
+                  <p className="text-6xl lg:text-8xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
                 </div>
 
-                {/* Feedback Area */}
-                <div className="flex-1 flex items-center justify-center min-h-[80px]">
-                   {feedback && <div className={`w-full p-4 rounded-2xl text-center font-black text-xl animate-bounce ${feedback.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{feedback.msg}</div>}
-                </div>
+                {/* Right Column: Controls */}
+                <div className="w-1/3 flex flex-col gap-4">
+                  {/* Stats */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-rose-100 p-4 rounded-2xl flex flex-col items-center justify-center text-rose-700">
+                      <Timer size={32} className="mb-1"/>
+                      <span className="text-2xl font-black">{Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</span>
+                    </div>
+                    <div className="bg-orange-100 p-4 rounded-2xl flex flex-col items-center justify-center text-orange-700">
+                      <Coins size={32} className="mb-1"/>
+                      <span className="text-2xl font-black">{totalAccumulatedScore}</span>
+                    </div>
+                  </div>
 
-                {/* Input */}
-                <form onSubmit={submitAnswer} className="flex flex-col gap-4">
-                  <input type="number" autoFocus value={answer} onChange={e => setAnswer(e.target.value)} className="w-full p-6 rounded-2xl border-4 border-slate-300 text-5xl text-center font-black outline-none focus:border-orange-500 transition-colors shadow-sm" placeholder="?"/>
-                  <button type="submit" className="w-full py-8 bg-slate-800 text-white rounded-2xl font-black text-4xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
-                </form>
+                  {/* Feedback Area */}
+                  <div className="flex-1 flex items-center justify-center min-h-[80px]">
+                     {feedback && <div className={`w-full p-4 rounded-2xl text-center font-black text-xl animate-bounce ${feedback.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{feedback.msg}</div>}
+                  </div>
+
+                  {/* Input */}
+                  <form onSubmit={submitAnswer} className="flex flex-col gap-4">
+                    <input type="number" autoFocus value={answer} onChange={e => setAnswer(e.target.value)} className="w-full p-6 rounded-2xl border-4 border-slate-300 text-5xl text-center font-black outline-none focus:border-orange-500 transition-colors shadow-sm" placeholder="?"/>
+                    <button type="submit" className="w-full py-8 bg-slate-800 text-white rounded-2xl font-black text-4xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
+                  </form>
+                </div>
               </div>
-            </div>
+            )
           )}
 
           {studentView === 'result' && (
