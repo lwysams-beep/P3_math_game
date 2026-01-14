@@ -1,19 +1,20 @@
 // @ts-nocheck
-// P.3 理財數學王 v4.8 (Robust Offline Fallback)
+// P.3 理財數學王 v4.9 (NET Shop-First & Admin Reset)
 // Date: 2026-01-14
 // Fixes: 
-// 1. Handled 'auth/configuration-not-found' by enabling automatic Offline Mode.
-// 2. Game can now start and play even without Firebase connection (scores stored locally).
-// 3. Added explicit UI indicators for Online vs Offline mode.
+// 1. NET Workflow changed: Login -> Select Shop -> Live Dashboard (w/ Auto Calc HKD & Quick Redeem).
+// 2. Added Student Name display in Game View.
+// 3. Reduced Question font size.
+// 4. Added "Reset All Scores" for Teacher (PWD: 61513110).
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTimestamp, increment, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTimestamp, increment, getDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { 
   Trophy, User, Coins, ArrowLeft, CheckCircle2, XCircle, 
   Calculator, Store, Wallet, Lock, Settings, LogOut, 
-  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff
+  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -38,12 +39,13 @@ const appId = (window).__app_id || 'p3-math-finance-v4-accum';
 // --- 2. Constants ---
 const TEACHER_PWD = "26754411!";
 const NET_PWD = "english_please";
+const RESET_PWD = "61513110"; // Teacher Reset Password
 const GAME_DURATION = 300; // 5 Minutes
 
 const SHOPS = [
-  { id: 'A', name_zh: 'A店 (快樂找換)', name_en: 'Shop A (Happy Exchange)', rate: 2, color: 'bg-emerald-600' },
-  { id: 'B', name_zh: 'B店 (幸運找換)', name_en: 'Shop B (Lucky Exchange)', rate: 3, color: 'bg-blue-600' },
-  { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600' }
+  { id: 'A', name_zh: 'A店 (快樂找換)', name_en: 'Shop A (Happy Exchange)', rate: 2, color: 'bg-emerald-600', lightColor: 'bg-emerald-50', borderColor: 'border-emerald-200', textColor: 'text-emerald-700' },
+  { id: 'B', name_zh: 'B店 (幸運找換)', name_en: 'Shop B (Lucky Exchange)', rate: 3, color: 'bg-blue-600', lightColor: 'bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
+  { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
 // --- 3. Smart Question Generator ---
@@ -215,7 +217,7 @@ const App = () => {
   const [view, setView] = useState('home');
   const [loading, setLoading] = useState(true);
   const [isStarting, setIsStarting] = useState(false); 
-  const [offlineMode, setOfflineMode] = useState(false); // NEW: Robust offline mode
+  const [offlineMode, setOfflineMode] = useState(false);
 
   // Student State
   const [studentView, setStudentView] = useState('class_select');
@@ -241,9 +243,8 @@ const App = () => {
 
   // NET State
   const [netPwd, setNetPwd] = useState('');
-  const [netSearch, setNetSearch] = useState('');
-  const [netStudent, setNetStudent] = useState(null);
-  const [selectedShop, setSelectedShop] = useState(null);
+  const [selectedShop, setSelectedShop] = useState(null); // Step 1: Shop Selection
+  // netStudent search is now part of the dashboard filter if needed, but we show live feed
 
   // Data Parsing
   const allStudents = useMemo(() => {
@@ -271,15 +272,14 @@ const App = () => {
           await signInAnonymously(auth);
         }
       } catch (err) {
-        console.error("Auth Failed (likely missing config in Console):", err);
-        // Do NOT block UI, just stay logged out, we will use offlineMode
+        console.error("Auth Failed:", err);
       }
       setLoading(false);
     };
     init();
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
-      if (u) setOfflineMode(false); // If we get a user, we are online
+      if (u) setOfflineMode(false);
     });
   }, []);
 
@@ -294,15 +294,17 @@ const App = () => {
     return () => clearInterval(timer);
   }, [gameActive, timeLeft]);
 
-  // Teacher Monitor
+  // Unified Live Monitor (Used by Teacher & NET)
   useEffect(() => {
-    if (!user || view !== 'teacher') return;
+    // Enable monitor for Teacher OR NET (once shop selected)
+    if (!user || (view !== 'teacher' && view !== 'net_dashboard')) return;
+    
     const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
     const unsub = onSnapshot(q, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setLiveData(data.sort((a, b) => b.score - a.score));
     }, (error) => {
-      console.log("Teacher monitor offline:", error);
+      console.log("Monitor offline:", error);
     });
     return () => unsub();
   }, [user, view]);
@@ -319,14 +321,11 @@ const App = () => {
     // OFFLINE FALLBACK CHECK
     let isOffline = offlineMode;
     if (!user) {
-      console.log("User not found, attempting anonymous sign-in...");
       try {
         await signInAnonymously(auth);
-        // Small delay to let auth state update
         await new Promise(r => setTimeout(r, 500));
         if (!auth.currentUser) throw new Error("Auth failed");
       } catch (e) {
-        console.warn("Server connection failed, switching to OFFLINE MODE.", e);
         isOffline = true;
         setOfflineMode(true);
       }
@@ -337,12 +336,10 @@ const App = () => {
     setStrikes(0);
     setTimeLeft(GAME_DURATION);
     
-    // Generate question
     const q = generateQuestion(difficulty);
     setCurrentQuestion(q);
     
     if (!isOffline && user) {
-      // ONLINE MODE
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id);
       try {
         const snap = await getDoc(docRef);
@@ -362,14 +359,11 @@ const App = () => {
           timestamp: serverTimestamp()
         }, { merge: true });
       } catch (e) {
-        console.error("DB Error, switching offline:", e);
-        setOfflineMode(true); // Fallback if DB write fails
-        setTotalAccumulatedScore(0); // Reset or load from local storage if implemented
+        setOfflineMode(true);
+        setTotalAccumulatedScore(0);
       }
     } else {
-      // OFFLINE MODE
-      console.log("Starting in Offline Mode");
-      setTotalAccumulatedScore(0); // In offline mode, simpler to start fresh or use localStorage if needed
+      setTotalAccumulatedScore(0);
     }
 
     setStudentView('play');
@@ -438,14 +432,13 @@ const App = () => {
     }
   };
 
-  const redeem = async () => {
-    if(!netStudent) return;
+  // NET Quick Redeem from Dashboard
+  const quickRedeem = async (studentId) => {
+    if(!user) return;
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', netStudent.id), { redeemed: true });
-      setNetStudent(prev => ({...prev, redeemed: true}));
-      setSelectedShop(null);
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', studentId), { redeemed: true });
     } catch(e) {
-      alert("Redeem failed (Offline)");
+      alert("Redeem failed");
     }
   };
 
@@ -458,11 +451,41 @@ const App = () => {
     }
   };
 
+  // Teacher: Reset All
+  const handleResetAll = async () => {
+    const pwd = prompt("請輸入重設密碼 (Enter Password to Reset All Scores):");
+    if (pwd !== RESET_PWD) {
+      alert("密碼錯誤 (Wrong Password)");
+      return;
+    }
+    
+    if(!confirm("⚠️ 危險操作 Warning ⚠️\n這將重置所有學生的分數歸零，且無法復原！\n確定要執行嗎？")) return;
+
+    try {
+      const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      
+      snapshot.docs.forEach((docSnap) => {
+        batch.update(docSnap.ref, { 
+          score: 0, 
+          redeemed: false, 
+          status: 'ready' 
+        });
+      });
+
+      await batch.commit();
+      alert("所有分數已重置 (All scores reset successfully).");
+    } catch (e) {
+      console.error("Batch Reset Error:", e);
+      alert("重置失敗 (Reset Failed): " + e.message);
+    }
+  };
+
   // --- Render ---
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
-  // Connection Indicator
   const ConnectionStatus = () => (
     <div className={`fixed top-4 left-4 z-50 flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${!offlineMode && user ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
       {!offlineMode && user ? <Wifi size={14}/> : <CloudOff size={14}/>}
@@ -475,7 +498,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.8</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.9</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -563,8 +586,14 @@ const App = () => {
             ) : (
               <div className="flex flex-row gap-6 h-full items-stretch">
                 <div className="w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
+                  {/* Name Display */}
+                  <div className="absolute top-4 left-6 text-slate-400 font-bold text-xl">
+                    {currentStudent.class} {currentStudent.name_zh}
+                  </div>
                   {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
-                  <p className="text-6xl lg:text-8xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
+                  
+                  {/* Question (Smaller font as requested) */}
+                  <p className="text-5xl lg:text-7xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
                 </div>
 
                 <div className="w-1/3 flex flex-col gap-4">
@@ -621,86 +650,78 @@ const App = () => {
       <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
         <h2 className="text-3xl font-black">NET Login</h2>
         <input type="password" value={netPwd} onChange={e => setNetPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
-        <button onClick={() => { if(netPwd === NET_PWD) setView('net'); else alert('Wrong Password'); }} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-bold text-xl hover:bg-purple-700">Enter</button>
+        <button onClick={() => { if(netPwd === NET_PWD) setView('net_select_shop'); else alert('Wrong Password'); }} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-bold text-xl hover:bg-purple-700">Enter</button>
         <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
       </div>
     </div>
   );
 
-  if (view === 'net') return (
-    <div className="h-screen w-screen bg-slate-50 p-4 overflow-hidden">
-      <div className="w-full h-full max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl border-b-8 border-purple-200 flex flex-col">
-        <div className="bg-purple-600 p-6 text-white flex justify-between items-center shrink-0">
-          <h2 className="font-bold text-2xl">NET Exchange</h2>
-          <button onClick={() => setView('home')}><LogOut size={28}/></button>
+  // Step 1: Shop Selection
+  if (view === 'net_select_shop') return (
+    <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
+      <div className="max-w-4xl w-full text-center space-y-8">
+        <h2 className="text-4xl font-black text-purple-900">Select Your Shop</h2>
+        <div className="grid grid-cols-3 gap-6">
+          {SHOPS.map(shop => (
+            <button key={shop.id} onClick={() => { setSelectedShop(shop); setView('net_dashboard'); }} className={`p-10 rounded-3xl border-4 ${shop.borderColor} ${shop.lightColor} hover:scale-105 transition-transform shadow-lg group`}>
+              <h3 className={`text-3xl font-black ${shop.textColor} mb-2`}>{shop.name_en}</h3>
+              <p className="font-bold text-slate-500">{shop.name_zh}</p>
+              <div className={`mt-4 inline-block px-4 py-2 rounded-xl text-white font-bold text-xl ${shop.color}`}>Rate: x{shop.rate}</div>
+            </button>
+          ))}
         </div>
-        <div className="p-8 flex-grow overflow-hidden flex flex-row gap-8">
-          
-          <div className="w-2/5 flex flex-col gap-6 overflow-y-auto">
-            <div className="flex gap-4">
-              <input type="text" value={netSearch} onChange={e => setNetSearch(e.target.value)} placeholder="Student Name / ID" className="flex-1 p-4 border-2 rounded-2xl text-xl"/>
-              <button onClick={() => {
-                const found = allStudents.find(s => s.name_en.toLowerCase().includes(netSearch.toLowerCase()) || s.name_zh === netSearch);
-                if (found) {
-                  const unsub = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'scores', found.id), (doc) => {
-                    if(doc.exists()) setNetStudent({ ...found, ...doc.data() });
-                    else setNetStudent({ ...found, score: 0 });
-                  });
-                } else alert('Not Found');
-              }} className="bg-purple-600 text-white px-6 rounded-2xl hover:bg-purple-700"><Search size={28}/></button>
+        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
+      </div>
+    </div>
+  );
+
+  // Step 2: NET Dashboard
+  if (view === 'net_dashboard' && selectedShop) return (
+    <div className="h-screen w-screen bg-slate-100 p-4 font-sans overflow-hidden">
+      <div className="w-full h-full max-w-[98vw] mx-auto flex flex-col">
+        <div className={`flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0 border-l-8 ${selectedShop.borderColor}`}>
+          <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-xl text-white ${selectedShop.color}`}><Store size={32}/></div>
+            <div>
+              <h2 className={`text-3xl font-black ${selectedShop.textColor}`}>{selectedShop.name_en} - Dashboard</h2>
+              <p className="text-slate-400 font-bold">Exchange Rate: ${selectedShop.rate} HKD / Coin</p>
             </div>
-            
-            {netStudent && (
-               <div className="bg-purple-50 p-8 rounded-3xl border-4 border-purple-100 shadow-sm flex-grow">
-                  <p className="text-4xl font-black text-slate-800 mb-2">{netStudent.name_en}</p>
-                  <p className="text-2xl font-bold text-slate-400 mb-8">{netStudent.class} {netStudent.name_zh}</p>
-                  
-                  <div className="bg-white p-6 rounded-2xl shadow-sm mb-6">
-                    <p className="text-sm font-bold text-purple-400">AVAILABLE COINS</p>
-                    <p className="text-6xl font-black text-purple-600">{netStudent.score}</p>
-                  </div>
-
-                  {netStudent.redeemed && (
-                    <div className="flex flex-col items-center bg-green-100 text-green-700 p-4 rounded-2xl font-bold border-2 border-green-200">
-                      <CheckCircle2 size={48} className="mb-2"/>
-                      <span className="text-2xl">ALREADY REDEEMED</span>
-                    </div>
-                  )}
-               </div>
-            )}
           </div>
-
-          <div className="w-3/5 bg-slate-50 rounded-3xl p-6 overflow-y-auto">
-             {!netStudent && <div className="h-full flex items-center justify-center text-slate-300 font-bold text-2xl">Search for a student to begin</div>}
-             
-             {netStudent && !netStudent.redeemed && (
-                <div className="space-y-6 h-full flex flex-col">
-                  <p className="font-bold text-slate-400 text-xl">Select Exchange Shop:</p>
-                  <div className="grid grid-cols-1 gap-4 flex-grow">
-                    {SHOPS.map(shop => (
-                      <button key={shop.id} onClick={() => setSelectedShop(shop)} className={`p-6 rounded-2xl border-4 text-left transition-all shadow-sm ${selectedShop?.id === shop.id ? 'border-purple-600 bg-purple-50 scale-[1.02]' : 'border-slate-100 hover:border-purple-200 bg-white'}`}>
-                        <div className="flex justify-between items-center">
-                          <div>
-                            <p className="font-black text-3xl text-slate-700 mb-1">{shop.name_en}</p>
-                            <p className="text-lg text-slate-400 font-bold">{shop.name_zh}</p>
-                          </div>
-                          <div className={`px-5 py-3 rounded-xl text-white font-bold text-2xl ${shop.color}`}>x{shop.rate}</div>
+          <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
+        </div>
+        
+        {/* Live Student Feed */}
+        <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
+          {['3A','3B','3C','3D'].map(cls => (
+            <div key={cls} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
+              <h3 className="font-black text-2xl text-slate-700 mb-4 border-b pb-4 text-center">{cls}</h3>
+              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+                {liveData.filter(d => d.class === cls).map(s => {
+                  const hkd = s.score * selectedShop.rate;
+                  return (
+                    <div key={s.id} className={`p-3 rounded-xl border-2 flex justify-between items-center ${s.redeemed ? 'bg-green-50 border-green-200 opacity-60' : 'bg-white border-slate-100'}`}>
+                      <div>
+                        <span className="font-bold text-md block text-slate-800">{s.name}</span>
+                        <div className="flex gap-3 text-xs mt-1">
+                          <span className="font-bold text-orange-500"><Coins size={10} className="inline mr-1"/>{s.score}</span>
+                          <span className={`font-black ${selectedShop.textColor}`}>${hkd}</span>
                         </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  {selectedShop && (
-                    <div className="bg-slate-800 text-white p-6 rounded-3xl text-center space-y-4 shadow-xl shrink-0">
-                      <p className="text-lg font-bold text-slate-400">TOTAL EXCHANGE VALUE (HKD)</p>
-                      <p className="text-7xl font-black text-emerald-400">${netStudent.score * selectedShop.rate}</p>
-                      <button onClick={redeem} className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 rounded-2xl font-black text-2xl mt-2 shadow-lg hover:shadow-emerald-500/50 transition-all">CONFIRM REDEEM</button>
+                      </div>
+                      
+                      {/* Action Button */}
+                      {!s.redeemed ? (
+                        <button onClick={() => quickRedeem(s.id)} className={`p-2 rounded-lg ${selectedShop.lightColor} hover:bg-slate-200 transition-colors`}>
+                          <Check size={20} className={selectedShop.textColor}/>
+                        </button>
+                      ) : (
+                        <CheckCircle2 size={20} className="text-green-500"/>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
-          </div>
-
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -729,7 +750,13 @@ const App = () => {
       <div className="w-full h-full max-w-[98vw] mx-auto flex flex-col">
         <div className="flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0">
           <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察 (Live Monitor)</h2>
-          <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
+          <div className="flex gap-4">
+            {/* RESET BUTTON */}
+            <button onClick={handleResetAll} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
+              <RotateCcw size={20}/> 重設所有分數
+            </button>
+            <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
+          </div>
         </div>
         <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
           {['3A','3B','3C','3D'].map(cls => (
