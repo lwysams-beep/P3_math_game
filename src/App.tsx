@@ -1,10 +1,9 @@
 // @ts-nocheck
-// P.3 理財數學王 v4.5 (Blank Screen Fix)
+// P.3 理財數學王 v4.6 (Fix Start Button & Center Login)
 // Date: 2026-01-14
 // Fixes: 
-// 1. Added loading guard in Play view to prevent blank screen if currentQuestion is null.
-// 2. Fixed CSS height collapse issue in Intro view (changed h-full to flex-grow).
-// 3. Consolidated view switching logic.
+// 1. Fixed "Start" button unresponsiveness by adding user/student checks and visual feedback.
+// 2. Centered Teacher & NET login screens (fixed "aligned left" issue) by enforcing w-screen h-screen.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -214,6 +213,7 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('home');
   const [loading, setLoading] = useState(true);
+  const [isStarting, setIsStarting] = useState(false); // New loading state for start button
 
   // Student State
   const [studentView, setStudentView] = useState('class_select');
@@ -301,7 +301,18 @@ const App = () => {
 
   // --- Logic ---
   const startGame = async () => {
-    if (!user || !currentStudent) return; 
+    // FIX: Add guards with alerts
+    if (!user) {
+      alert("系統連接中... 請稍後再試 (System connecting...)");
+      return;
+    }
+    if (!currentStudent) {
+      alert("請先選擇學生 (Please select a student)");
+      return;
+    }
+
+    setIsStarting(true); // Show loading indicator
+    
     setGameActive(true);
     setSessionScore(0);
     setStrikes(0);
@@ -310,9 +321,6 @@ const App = () => {
     // Generate question FIRST
     const q = generateQuestion(difficulty);
     setCurrentQuestion(q);
-    
-    // Switch view LAST to prevent "blank screen" race condition
-    setStudentView('play');
     
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id);
     
@@ -333,8 +341,14 @@ const App = () => {
         redeemed: snap.exists() ? snap.data().redeemed : false,
         timestamp: serverTimestamp()
       }, { merge: true });
+
+      // Switch view LAST after DB operations
+      setStudentView('play');
     } catch (e) {
       console.error("Start Game Error:", e);
+      alert("開始遊戲時發生錯誤，請重試。");
+    } finally {
+      setIsStarting(false);
     }
   };
 
@@ -420,7 +434,7 @@ const App = () => {
     <div className="h-screen w-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4 overflow-hidden">
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.5</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.6</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       {/* FORCE GRID 3 COLS for Landscape */}
@@ -487,11 +501,17 @@ const App = () => {
           )}
 
           {studentView === 'intro' && (
-            // Fix: Changed h-full to flex-grow for robust centering
             <div className="flex-grow flex flex-col justify-center items-center space-y-8">
               <h2 className="text-7xl font-black text-slate-800">Ready?</h2>
               <p className="text-3xl font-bold text-slate-500">5 分鐘限時挑戰！<br/>答錯 3 次會扣分喔！</p>
-              <button onClick={startGame} className="px-20 py-8 bg-orange-500 text-white rounded-full text-5xl font-black animate-pulse shadow-xl hover:scale-105 transition-transform"><Play size={48} fill="currentColor" className="inline mr-3"/> START</button>
+              <button 
+                onClick={startGame} 
+                disabled={isStarting}
+                className={`px-20 py-8 bg-orange-500 text-white rounded-full text-5xl font-black shadow-xl hover:scale-105 transition-transform flex items-center ${isStarting ? 'opacity-75 cursor-wait' : 'animate-pulse'}`}
+              >
+                {isStarting ? <Loader2 className="animate-spin mr-3" size={48} /> : <Play size={48} fill="currentColor" className="inline mr-3"/>} 
+                {isStarting ? "STARTING..." : "START"}
+              </button>
             </div>
           )}
 
@@ -562,8 +582,9 @@ const App = () => {
   );
 
   // NET
+  // FIX: Force w-screen h-screen for perfect centering
   if (view === 'net_login') return (
-    <div className="min-h-screen bg-purple-50 flex items-center justify-center p-4">
+    <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
       <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
         <h2 className="text-3xl font-black">NET Login</h2>
         <input type="password" value={netPwd} onChange={e => setNetPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
@@ -656,8 +677,9 @@ const App = () => {
   );
 
   // Teacher
+  // FIX: Force w-screen h-screen for perfect centering
   if (view === 'teacher_login') return (
-    <div className="min-h-screen bg-indigo-50 flex items-center justify-center p-4">
+    <div className="w-screen h-screen bg-indigo-50 flex items-center justify-center p-4">
       <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
         <h2 className="text-3xl font-black">老師後台</h2>
         <input type="password" value={teacherPwd} onChange={e => setTeacherPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
