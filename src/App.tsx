@@ -25,12 +25,15 @@ const userFirebaseConfig = {
   appId: "1:330710509952:web:99966ad83282621c497965"
 };
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
+// 使用 window (any) 來避開 TS 檢查
+const firebaseConfig = (window as any).__firebase_config 
+  ? JSON.parse((window as any).__firebase_config) 
+  : userFirebaseConfig;
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'p3-math-finance-v4-accum'; 
+const appId = (window as any).__app_id || 'p3-math-finance-v4-accum';
 
 // --- 2. Constants ---
 const TEACHER_PWD = "26754411!";
@@ -271,9 +274,10 @@ const App = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
+        const token = (window as any).__initial_auth_token;
+if (token) {
+   await signInWithCustomToken(auth, token);
+} else {
           await signInAnonymously(auth);
         }
       } catch (err) {
