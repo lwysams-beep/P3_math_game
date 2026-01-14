@@ -1,9 +1,10 @@
 // @ts-nocheck
-// P.3 理財數學王 v4.6 (Fix Start Button & Center Login)
+// P.3 理財數學王 v4.7 (Connection Retry Fix)
 // Date: 2026-01-14
 // Fixes: 
-// 1. Fixed "Start" button unresponsiveness by adding user/student checks and visual feedback.
-// 2. Centered Teacher & NET login screens (fixed "aligned left" issue) by enforcing w-screen h-screen.
+// 1. Added "Force Re-connect" logic inside startGame. If user is null, it tries to sign in again immediately.
+// 2. Added visual Connection Status indicator (Green/Red dot).
+// 3. Improved error handling for network timeouts.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -12,7 +13,7 @@ import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTim
 import { 
   Trophy, User, Coins, ArrowLeft, CheckCircle2, XCircle, 
   Calculator, Store, Wallet, Lock, Settings, LogOut, 
-  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2
+  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -213,7 +214,7 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('home');
   const [loading, setLoading] = useState(true);
-  const [isStarting, setIsStarting] = useState(false); // New loading state for start button
+  const [isStarting, setIsStarting] = useState(false); 
 
   // Student State
   const [studentView, setStudentView] = useState('class_select');
@@ -258,7 +259,7 @@ const App = () => {
     return map;
   }, [allStudents]);
 
-  // Auth
+  // Auth Init
   useEffect(() => {
     const init = async () => {
       try {
@@ -301,18 +302,33 @@ const App = () => {
 
   // --- Logic ---
   const startGame = async () => {
-    // FIX: Add guards with alerts
-    if (!user) {
-      alert("系統連接中... 請稍後再試 (System connecting...)");
-      return;
-    }
     if (!currentStudent) {
       alert("請先選擇學生 (Please select a student)");
       return;
     }
 
-    setIsStarting(true); // Show loading indicator
+    setIsStarting(true);
     
+    // FIX: Connection Retry Logic
+    if (!user) {
+      console.log("User not found, attempting re-connection...");
+      try {
+        await signInAnonymously(auth);
+        // Wait a short moment for auth state to sync
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        if (!auth.currentUser) {
+           throw new Error("Re-connection failed");
+        }
+        console.log("Re-connected successfully");
+      } catch (e) {
+        console.error("Connection Error:", e);
+        alert("無法連接伺服器，請檢查網絡設定 (Connection Failed: " + e.message + ")");
+        setIsStarting(false);
+        return;
+      }
+    }
+
     setGameActive(true);
     setSessionScore(0);
     setStrikes(0);
@@ -342,11 +358,10 @@ const App = () => {
         timestamp: serverTimestamp()
       }, { merge: true });
 
-      // Switch view LAST after DB operations
       setStudentView('play');
     } catch (e) {
       console.error("Start Game Error:", e);
-      alert("開始遊戲時發生錯誤，請重試。");
+      alert("開始遊戲時發生錯誤 (Start Error)，請確保網絡暢通。");
     } finally {
       setIsStarting(false);
     }
@@ -430,14 +445,22 @@ const App = () => {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
+  // Connection Indicator
+  const ConnectionStatus = () => (
+    <div className={`fixed top-4 left-4 z-50 flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${user ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+      {user ? <Wifi size={14}/> : <WifiOff size={14}/>}
+      {user ? 'Online' : 'Offline'}
+    </div>
+  );
+
   if (view === 'home') return (
-    <div className="h-screen w-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4 overflow-hidden">
+    <div className="h-screen w-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4 overflow-hidden relative">
+      <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.6</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.7</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
-      {/* FORCE GRID 3 COLS for Landscape */}
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
         <button onClick={() => setView('student')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-orange-200 hover:scale-105 transition-all text-center group">
           <User size={48} className="mx-auto text-orange-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是學生</h2>
@@ -455,14 +478,14 @@ const App = () => {
 
   // Student
   if (view === 'student') return (
-    <div className="h-screen w-screen bg-orange-50 p-4 overflow-hidden">
+    <div className="h-screen w-screen bg-orange-50 p-4 overflow-hidden relative">
+      <ConnectionStatus/>
       <div className="w-full h-full max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 flex flex-col">
         <div className="bg-orange-500 p-4 text-white flex justify-between items-center shrink-0">
           <button onClick={() => setView('home')}><ArrowLeft/></button>
           <h2 className="font-bold">比賽專區 (Student Zone)</h2>
           <div className="w-6"></div>
         </div>
-        {/* Fix: Added flex flex-col to parent so children flex-grow works properly */}
         <div className="p-6 flex-grow overflow-y-auto flex flex-col">
            {studentView === 'class_select' && (
             <div className="grid grid-cols-4 gap-6 h-full items-center">
@@ -515,7 +538,6 @@ const App = () => {
             </div>
           )}
 
-          {/* GAME VIEW - LANDSCAPE SPLIT SCREEN */}
           {studentView === 'play' && (
             !currentQuestion ? (
               <div className="flex-grow flex items-center justify-center">
@@ -523,15 +545,12 @@ const App = () => {
               </div>
             ) : (
               <div className="flex flex-row gap-6 h-full items-stretch">
-                {/* Left Column: Question */}
                 <div className="w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
                   {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
                   <p className="text-6xl lg:text-8xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
                 </div>
 
-                {/* Right Column: Controls */}
                 <div className="w-1/3 flex flex-col gap-4">
-                  {/* Stats */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-rose-100 p-4 rounded-2xl flex flex-col items-center justify-center text-rose-700">
                       <Timer size={32} className="mb-1"/>
@@ -543,12 +562,10 @@ const App = () => {
                     </div>
                   </div>
 
-                  {/* Feedback Area */}
                   <div className="flex-1 flex items-center justify-center min-h-[80px]">
                      {feedback && <div className={`w-full p-4 rounded-2xl text-center font-black text-xl animate-bounce ${feedback.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{feedback.msg}</div>}
                   </div>
 
-                  {/* Input */}
                   <form onSubmit={submitAnswer} className="flex flex-col gap-4">
                     <input type="number" autoFocus value={answer} onChange={e => setAnswer(e.target.value)} className="w-full p-6 rounded-2xl border-4 border-slate-300 text-5xl text-center font-black outline-none focus:border-orange-500 transition-colors shadow-sm" placeholder="?"/>
                     <button type="submit" className="w-full py-8 bg-slate-800 text-white rounded-2xl font-black text-4xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
@@ -582,7 +599,6 @@ const App = () => {
   );
 
   // NET
-  // FIX: Force w-screen h-screen for perfect centering
   if (view === 'net_login') return (
     <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
       <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
@@ -601,10 +617,8 @@ const App = () => {
           <h2 className="font-bold text-2xl">NET Exchange</h2>
           <button onClick={() => setView('home')}><LogOut size={28}/></button>
         </div>
-        {/* Split Screen for NET */}
         <div className="p-8 flex-grow overflow-hidden flex flex-row gap-8">
           
-          {/* Left Column: Search & Info (40%) */}
           <div className="w-2/5 flex flex-col gap-6 overflow-y-auto">
             <div className="flex gap-4">
               <input type="text" value={netSearch} onChange={e => setNetSearch(e.target.value)} placeholder="Student Name / ID" className="flex-1 p-4 border-2 rounded-2xl text-xl"/>
@@ -639,7 +653,6 @@ const App = () => {
             )}
           </div>
 
-          {/* Right Column: Shops (60%) */}
           <div className="w-3/5 bg-slate-50 rounded-3xl p-6 overflow-y-auto">
              {!netStudent && <div className="h-full flex items-center justify-center text-slate-300 font-bold text-2xl">Search for a student to begin</div>}
              
@@ -677,7 +690,6 @@ const App = () => {
   );
 
   // Teacher
-  // FIX: Force w-screen h-screen for perfect centering
   if (view === 'teacher_login') return (
     <div className="w-screen h-screen bg-indigo-50 flex items-center justify-center p-4">
       <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
@@ -702,7 +714,6 @@ const App = () => {
           <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察 (Live Monitor)</h2>
           <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
         </div>
-        {/* FORCE 4 COLUMNS for Teacher */}
         <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
           {['3A','3B','3C','3D'].map(cls => (
             <div key={cls} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
