@@ -1,7 +1,7 @@
 // @ts-nocheck
-// P.3 理財數學王 v4.1 (Full Fix)
+// P.3 理財數學王 v4.2 (Wide Screen Fix)
 // Date: 2026-01-14
-// Fixes: UI Width, NET Text, Teacher Login Alert, TypeScript Errors
+// Fixes: Removed Vercel Login (Instruction only), Forced Wide UI layout (95vw)
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -421,11 +421,11 @@ const App = () => {
     <div className="min-h-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4">
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.0</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.2</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
-      {/* FIX 1: 加寬容器 max-w-4xl -> max-w-6xl */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-6xl">
+      {/* FIX: 使用 90% 螢幕寬度 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-[90%] max-w-[1200px]">
         <button onClick={() => setView('student')} className="p-8 bg-white rounded-3xl shadow-xl border-b-8 border-orange-200 hover:scale-105 transition-all text-center group">
           <User size={48} className="mx-auto text-orange-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是學生</h2>
         </button>
@@ -434,7 +434,6 @@ const App = () => {
         </button>
         <button onClick={() => setView('net_login')} className="p-8 bg-white rounded-3xl shadow-xl border-b-8 border-purple-200 hover:scale-105 transition-all text-center group">
           <Languages size={48} className="mx-auto text-purple-500 mb-2 group-hover:scale-110 transition-transform"/>
-          {/* FIX 2: 文字改為 NET */}
           <h2 className="text-2xl font-black text-slate-700">NET</h2>
         </button>
       </div>
@@ -444,8 +443,8 @@ const App = () => {
   // Student
   if (view === 'student') return (
     <div className="min-h-screen bg-orange-50 p-4">
-      {/* FIX 1: 加寬學生介面 max-w-2xl -> w-full max-w-6xl */}
-      <div className="w-full max-w-6xl mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 min-h-[600px]">
+      {/* FIX: 使用 w-full 和 max-w-[95vw] 確保佔滿螢幕 */}
+      <div className="w-full max-w-[95vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 min-h-[600px]">
         <div className="bg-orange-500 p-4 text-white flex justify-between items-center">
           <button onClick={() => setView('home')}><ArrowLeft/></button>
           <h2 className="font-bold">比賽專區</h2>
@@ -462,14 +461,14 @@ const App = () => {
             <div className="space-y-4">
               <button onClick={() => setStudentView('class_select')}>Back</button>
               <h3 className="text-2xl font-black">Select Name</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-[60vh] overflow-y-auto"> {/* 優化列表顯示 */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-[60vh] overflow-y-auto">
                 {studentsByClass[selectedClass]?.map(s => <button key={s.id} onClick={() => {setCurrentStudent(s); setStudentView('difficulty');}} className="p-4 bg-slate-50 hover:bg-orange-100 rounded-xl text-left border font-bold">{s.name_zh}</button>)}
               </div>
             </div>
           )}
 
           {studentView === 'difficulty' && (
-            <div className="space-y-4 text-center max-w-2xl mx-auto"> {/* 限制難度選擇的寬度，保持美觀 */}
+            <div className="space-y-4 text-center max-w-2xl mx-auto">
               <h3 className="text-2xl font-black">選擇挑戰難度</h3>
               <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="w-full p-6 bg-green-100 border-2 border-green-300 rounded-2xl text-xl font-black text-green-800">
                 初級 (Low)<br/><span className="text-sm font-bold">每題 5 分 (扣 2 分)</span>
@@ -492,7 +491,7 @@ const App = () => {
           )}
 
           {studentView === 'play' && currentQuestion && (
-            <div className="space-y-6 max-w-4xl mx-auto">
+            <div className="space-y-6 max-w-5xl mx-auto">
               <div className="flex justify-between items-center bg-slate-100 p-3 rounded-xl">
                 <div className="flex items-center gap-2 text-rose-600 font-black text-xl"><Timer/> {Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</div>
                 <div className="flex items-center gap-2 text-orange-500 font-black text-xl"><Coins/> {totalAccumulatedScore}</div>
@@ -549,8 +548,8 @@ const App = () => {
 
   if (view === 'net') return (
     <div className="min-h-screen bg-slate-50 p-4">
-       {/* NET 介面也稍微加寬 */}
-      <div className="max-w-3xl mx-auto bg-white rounded-[2rem] shadow-xl border-b-8 border-purple-200 min-h-[800px]">
+      {/* FIX: 加寬 NET 介面 */}
+      <div className="w-full max-w-[95vw] mx-auto bg-white rounded-[2rem] shadow-xl border-b-8 border-purple-200 min-h-[800px]">
         <div className="bg-purple-600 p-6 text-white flex justify-between items-center">
           <h2 className="font-bold text-lg">NET Exchange</h2>
           <button onClick={() => setView('home')}><LogOut/></button>
@@ -591,8 +590,8 @@ const App = () => {
               </div>
 
               {!netStudent.redeemed && (
-                <div className="grid grid-cols-1 gap-4">
-                  <p className="font-bold text-slate-400">Select Shop Rate:</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <p className="font-bold text-slate-400 col-span-full">Select Shop Rate:</p>
                   {SHOPS.map(shop => (
                     <button key={shop.id} onClick={() => setSelectedShop(shop)} className={`p-4 rounded-xl border-2 text-left transition-all ${selectedShop?.id === shop.id ? 'border-purple-600 bg-purple-50' : 'border-slate-100 hover:border-purple-200'}`}>
                       <div className="flex justify-between items-center">
@@ -627,7 +626,6 @@ const App = () => {
       <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full text-center space-y-4">
         <h2 className="text-2xl font-black">老師後台</h2>
         <input type="password" value={teacherPwd} onChange={e => setTeacherPwd(e.target.value)} className="w-full p-4 border rounded-xl text-center" placeholder="Password"/>
-        {/* FIX 3: 增加 else alert 處理密碼錯誤狀況 */}
         <button onClick={() => { 
           if(teacherPwd === TEACHER_PWD) {
             setView('teacher');
@@ -642,7 +640,7 @@ const App = () => {
 
   if (view === 'teacher') return (
     <div className="min-h-screen bg-slate-100 p-4 font-sans">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-[95vw] mx-auto">
         <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm">
           <h2 className="text-2xl font-black text-indigo-700 flex items-center gap-2"><BarChart3/> 實時監察</h2>
           <button onClick={() => setView('home')} className="bg-slate-100 p-2 rounded-lg text-slate-500"><LogOut/></button>
