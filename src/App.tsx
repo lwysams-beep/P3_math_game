@@ -1,11 +1,11 @@
 // @ts-nocheck
-// P.3 理財數學王 v5.3 (Strict Low Difficulty)
+// P.3 理財數學王 v5.4 (Data Analytics & CSV Report)
 // Date: 2026-01-14
 // Fixes: 
-// 1. "Low" Difficulty STRICTLY enforced to 2-digit x 1-digit (Min n1=12).
-// 2. No single digit multiplication (e.g. 5x3 is gone).
-// 3. Division logic updated to ensure 2-digit dividends and preferably 2-digit quotients (10-20).
-// 4. Word problems minimum price set to $12 to prevent simple calculations.
+// 1. Student View: Added realtime counters for Correct (✅) and Wrong (❌) answers.
+// 2. Teacher View: Added CSV Export with detailed analysis (Accuracy, Weakness detection).
+// 3. Backend: Tracking specific error types (mul, div, app, logic) for analysis generation.
+// 4. Reset function now clears all analytic data.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -14,7 +14,7 @@ import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTim
 import { 
   Trophy, User, Coins, ArrowLeft, CheckCircle2, XCircle, 
   Calculator, Store, Wallet, Lock, Settings, LogOut, 
-  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check, Undo2
+  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check, Undo2, FileDown
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -48,112 +48,99 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Smart Question Generator (v5.3 Logic) ---
+// --- 3. Smart Question Generator (v5.4 Logic with Categories) ---
 
-// Item Database for Word Problems
 const ITEMS_DB = [
-  { name: '蘋果', unit: '個' },
-  { name: '擦膠', unit: '塊' },
-  { name: '鉛筆', unit: '枝' },
-  { name: '原子筆', unit: '枝' },
-  { name: '間尺', unit: '把' },
-  { name: '筆記簿', unit: '本' },
-  { name: '故事書', unit: '本' },
-  { name: '漫畫', unit: '本' },
-  { name: '三文治', unit: '件' },
-  { name: '漢堡包', unit: '個' },
-  { name: '薯片', unit: '包' },
-  { name: '朱古力', unit: '排' },
-  { name: '玩具車', unit: '輛' },
-  { name: '公仔', unit: '個' },
-  { name: '顏色筆', unit: '盒' }
+  { name: '蘋果', unit: '個' }, { name: '擦膠', unit: '塊' }, { name: '鉛筆', unit: '枝' },
+  { name: '原子筆', unit: '枝' }, { name: '間尺', unit: '把' }, { name: '筆記簿', unit: '本' },
+  { name: '故事書', unit: '本' }, { name: '漫畫', unit: '本' }, { name: '三文治', unit: '件' },
+  { name: '漢堡包', unit: '個' }, { name: '薯片', unit: '包' }, { name: '朱古力', unit: '排' },
+  { name: '玩具車', unit: '輛' }, { name: '公仔', unit: '個' }, { name: '顏色筆', unit: '盒' }
 ];
 
 const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
 
 const generateQuestion = (difficulty) => {
-  let q = "", a = 0, score = 0, penalty = 0, hint = "";
+  let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
   const rand = Math.random();
 
-  // --- LOW DIFFICULTY (Strict 2-digit x 1-digit, NO simple tables) ---
+  // Categories: 'mul' (Multiplication), 'div' (Division), 'app' (Word Problems), 'logic' (Logic/Multi-step)
+
   if (difficulty === 'low') {
     score = 5; penalty = 2;
     if (rand < 0.33) {
-      // Type: 2-digit Multiplication (Strict > 10)
-      // n1: 12 to 49 (Ensures 2 digits, not too hard but not 5x3)
+      // Type: 2-digit Mul
       const n1 = Math.floor(Math.random() * 38) + 12; 
-      const n2 = Math.floor(Math.random() * 5) + 2;   // 2 - 6
+      const n2 = Math.floor(Math.random() * 5) + 2;   
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
       hint = `試用直式計算：先用 ${n2} 乘個位，再乘十位。`;
+      category = 'mul';
     } else if (rand < 0.66) {
-      // Type: 2-digit Division (Quotient 10-20 to ensure 2-digit dividend)
-      const ans = Math.floor(Math.random() * 11) + 10; // Answer: 10 - 20
-      const n2 = Math.floor(Math.random() * 4) + 2;    // Divisor: 2 - 5
+      // Type: 2-digit Div
+      const ans = Math.floor(Math.random() * 11) + 10; 
+      const n2 = Math.floor(Math.random() * 4) + 2;    
       const total = ans * n2;
       q = `${total} ÷ ${n2} = ?`;
       a = ans;
       hint = `這是兩位數除法。${n2} 乘 10 是 ${n2*10}，答案一定比 10 大或等於 10。`;
+      category = 'div';
     } else {
-      // Type: Word Problem (Price > $12)
+      // Type: Word Problem
       const item = getRandomItem();
-      const count = Math.floor(Math.random() * 4) + 2; // Count: 2 - 5
-      const price = Math.floor(Math.random() * 24) + 12; // Price: $12 - $35
+      const count = Math.floor(Math.random() * 4) + 2; 
+      const price = Math.floor(Math.random() * 24) + 12; 
       q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
       a = price * count;
       hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count})。`;
+      category = 'app';
     }
   } 
-  
-  // --- MID DIFFICULTY (Harder 2-digit, Carry logic) ---
   else if (difficulty === 'mid') {
     score = 10; penalty = 5;
     if (rand < 0.33) {
-      // Type: Harder 2-digit Multiplication
-      const n1 = Math.floor(Math.random() * 50) + 40; // Range: 40 - 89
-      const n2 = Math.floor(Math.random() * 6) + 4;   // Range: 4 - 9
+      const n1 = Math.floor(Math.random() * 50) + 40; 
+      const n2 = Math.floor(Math.random() * 6) + 4;   
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
       hint = "直式計算：注意進位！先算個位，積滿十要進到十位。";
+      category = 'mul';
     } else if (rand < 0.66) {
-      // Type: Harder Division (Quotient > 20)
-      const ans = Math.floor(Math.random() * 30) + 20; // Answer: 20 - 49
-      const n2 = Math.floor(Math.random() * 5) + 3;    // Divisor: 3 - 7
+      const ans = Math.floor(Math.random() * 30) + 20; 
+      const n2 = Math.floor(Math.random() * 5) + 3;    
       const total = ans * n2;
       q = `${total} ÷ ${n2} = ?`;
       a = ans;
       hint = `試用直式除法：先看十位夠不夠除，不夠就看兩位。`;
+      category = 'div';
     } else {
-      // Type: Word Problem (Larger numbers)
       const item = getRandomItem();
-      const count = Math.floor(Math.random() * 6) + 4; // Count: 4 - 9
-      const price = Math.floor(Math.random() * 30) + 25; // Price: $25 - $54
+      const count = Math.floor(Math.random() * 6) + 4; 
+      const price = Math.floor(Math.random() * 30) + 25; 
       q = `老師買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
       a = price * count;
       hint = `較大的數字乘法。$${price} × ${count}，建議用直式計算。`;
+      category = 'app';
     }
   } 
-  
-  // --- HIGH DIFFICULTY (3-digit, Multi-step) ---
   else { 
     score = 20; penalty = 10;
     if (rand < 0.3) {
-      // Type: 3-digit x 1-digit
-      const n1 = Math.floor(Math.random() * 400) + 100; // 100-499
-      const n2 = Math.floor(Math.random() * 7) + 3;     // 3-9
+      const n1 = Math.floor(Math.random() * 400) + 100; 
+      const n2 = Math.floor(Math.random() * 7) + 3;     
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
       hint = "直式乘法：由右至左計算 (個位→十位→百位)，別忘了把進位的數加上去！";
+      category = 'mul';
     } else if (rand < 0.6) {
-      // Type: Division with money context (Sharing)
-      const totalMoney = Math.floor(Math.random() * 80) * 5 + 100; // Multiples of 5
+      const totalMoney = Math.floor(Math.random() * 80) * 5 + 100; 
       const people = 5;
       q = `將 $${totalMoney} 平均分給 ${people} 人，每人可得多少元？`;
       a = totalMoney / people;
       hint = "平均分就是除法。請計算 " + totalMoney + " ÷ " + people + "。";
+      category = 'div';
     } else {
-      // Type: Multi-step / Logic (Remaining Money)
-      const wallet = Math.floor(Math.random() * 5) * 10 + 300; // 300+
+      const wallet = Math.floor(Math.random() * 5) * 10 + 300; 
       const item = getRandomItem();
       const count = Math.floor(Math.random() * 4) + 2;
       const price = Math.floor(Math.random() * 40) + 30; 
@@ -162,15 +149,17 @@ const generateQuestion = (difficulty) => {
          q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}共需多少元？`;
          a = price * count;
          hint = `計算 ${price} × ${count} 即可。`;
+         category = 'app';
       } else {
          q = `小明有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。他還剩下多少元？`;
          a = wallet - (price * count);
          hint = `這題有兩步：\n1. 先算買東西共用了多少錢 (${price} × ${count})\n2. 再用原本有的錢減去用去的錢。`;
+         category = 'logic';
       }
     }
   }
   
-  return { q, a, score, penalty, difficulty, hint };
+  return { q, a, score, penalty, difficulty, hint, category };
 };
 
 // CSV Data 
@@ -293,7 +282,9 @@ const App = () => {
   const [gameActive, setGameActive] = useState(false);
   const [strikes, setStrikes] = useState(0); 
   const [sessionScore, setSessionScore] = useState(0); 
-  const [totalAccumulatedScore, setTotalAccumulatedScore] = useState(0); 
+  const [totalAccumulatedScore, setTotalAccumulatedScore] = useState(0);
+  const [sessionCorrect, setSessionCorrect] = useState(0);
+  const [sessionWrong, setSessionWrong] = useState(0); 
 
   // Teacher State
   const [teacherPwd, setTeacherPwd] = useState('');
@@ -390,6 +381,8 @@ const App = () => {
 
     setGameActive(true);
     setSessionScore(0);
+    setSessionCorrect(0); // Reset local counters for session view
+    setSessionWrong(0);
     setStrikes(0);
     setTimeLeft(GAME_DURATION);
     
@@ -401,17 +394,26 @@ const App = () => {
       try {
         const snap = await getDoc(docRef);
         let prevScore = 0;
+        let prevCorrect = 0;
+        let prevWrong = 0;
         if (snap.exists()) {
           prevScore = snap.data().score || 0;
+          prevCorrect = snap.data().correctCount || 0;
+          prevWrong = snap.data().wrongCount || 0;
         }
         setTotalAccumulatedScore(prevScore); 
+        // We accumulate locally for display, but main truth is in DB
+        setSessionCorrect(prevCorrect);
+        setSessionWrong(prevWrong);
 
         await setDoc(docRef, {
           name: currentStudent.name_zh,
           name_en: currentStudent.name_en,
           class: currentStudent.class,
           status: 'playing',
-          score: prevScore, 
+          score: prevScore,
+          correctCount: prevCorrect,
+          wrongCount: prevWrong,
           redeemed: snap.exists() ? snap.data().redeemed : false,
           timestamp: serverTimestamp()
         }, { merge: true });
@@ -435,12 +437,14 @@ const App = () => {
     if (correct) {
       const gained = currentQuestion.score;
       setSessionScore(s => s + gained);
-      setTotalAccumulatedScore(s => s + gained); 
+      setTotalAccumulatedScore(s => s + gained);
+      setSessionCorrect(s => s + 1);
       setFeedback({ ok: true, msg: `答對了！+${gained} 分` });
       
       if(!offlineMode && user && currentStudent) {
         updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { 
-          score: increment(gained) 
+          score: increment(gained),
+          correctCount: increment(1)
         }).catch(() => setOfflineMode(true));
       }
       
@@ -456,23 +460,26 @@ const App = () => {
       setStrikes(newStrikes);
 
       if (newStrikes < 3) {
-        // Show HINT instead of just "Wrong"
         setFeedback({ 
           ok: false, 
           msg: `答錯了！${currentQuestion.hint} (還有 ${3 - newStrikes} 次機會)` 
         });
         setAnswer(''); 
-        // Longer timeout for user to read hint
         setTimeout(() => setFeedback(null), 4000);
       } else {
         const penalty = currentQuestion.penalty;
         setSessionScore(s => s - penalty); 
         setTotalAccumulatedScore(s => Math.max(0, s - penalty));
+        setSessionWrong(s => s + 1);
         setFeedback({ ok: false, msg: `3次錯誤！扣 ${penalty} 分。答案是 ${currentQuestion.a}` });
         
         if(!offlineMode && user && currentStudent) {
+          // Track specific error category
+          const errField = `errors.${currentQuestion.category}`;
           updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { 
-            score: increment(-penalty) 
+            score: increment(-penalty),
+            wrongCount: increment(1),
+            [errField]: increment(1)
           }).catch(() => setOfflineMode(true));
         }
 
@@ -530,13 +537,68 @@ const App = () => {
       const snapshot = await getDocs(q);
       const batch = writeBatch(db);
       snapshot.docs.forEach((docSnap) => {
-        batch.update(docSnap.ref, { score: 0, redeemed: false, status: 'ready' });
+        batch.update(docSnap.ref, { 
+          score: 0, 
+          redeemed: false, 
+          status: 'ready',
+          correctCount: 0,
+          wrongCount: 0,
+          'errors.mul': 0,
+          'errors.div': 0,
+          'errors.app': 0,
+          'errors.logic': 0
+        });
       });
       await batch.commit();
-      alert("所有分數已重置 (All scores reset successfully).");
+      alert("所有分數及數據已重置 (All data reset).");
     } catch (e) {
       alert("重置失敗 (Reset Failed): " + e.message);
     }
+  };
+
+  const downloadCSV = () => {
+    const headers = ["Class", "Name", "Score", "Correct", "Wrong", "Accuracy (%)", "Analysis"];
+    const csvRows = [headers.join(",")];
+
+    liveData.forEach(s => {
+      const correct = s.correctCount || 0;
+      const wrong = s.wrongCount || 0;
+      const total = correct + wrong;
+      const accuracy = total > 0 ? ((correct / total) * 100).toFixed(1) : "0.0";
+      
+      // Analysis Logic
+      let analysis = "表現均衡 (Balanced)";
+      const errs = s.errors || {};
+      const maxErr = Math.max(errs.mul || 0, errs.div || 0, errs.app || 0, errs.logic || 0);
+      
+      if (maxErr > 0) {
+        if (maxErr === errs.app) analysis = "應用題需加強 (Weak in Word Problems)";
+        else if (maxErr === errs.div) analysis = "除法運算需加強 (Weak in Division)";
+        else if (maxErr === errs.mul) analysis = "乘法運算需加強 (Weak in Multiplication)";
+        else if (maxErr === errs.logic) analysis = "邏輯思維需加強 (Weak in Logic)";
+      }
+      if (total === 0) analysis = "尚未開始 (Not Started)";
+
+      const row = [
+        s.class,
+        s.name,
+        s.score,
+        correct,
+        wrong,
+        accuracy,
+        analysis
+      ];
+      csvRows.push(row.join(","));
+    });
+
+    const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Math_Competition_Report_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // --- Render ---
@@ -555,7 +617,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.3</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.4</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -648,7 +710,7 @@ const App = () => {
                   </div>
                   {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
                   
-                  {/* Question (Smaller font as requested - changed from 6xl/8xl to 4xl/6xl) */}
+                  {/* Question */}
                   <p className="text-4xl lg:text-6xl font-bold text-slate-800 text-center leading-tight px-4">{currentQuestion.q}</p>
                 </div>
 
@@ -661,6 +723,18 @@ const App = () => {
                     <div className="bg-orange-100 p-4 rounded-2xl flex flex-col items-center justify-center text-orange-700">
                       <Coins size={32} className="mb-1"/>
                       <span className="text-2xl font-black">{totalAccumulatedScore}</span>
+                    </div>
+                  </div>
+
+                  {/* NEW: Student Stats Display */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-green-50 p-2 rounded-xl flex items-center justify-center gap-2 text-green-700 border border-green-200">
+                      <CheckCircle2 size={20}/>
+                      <span className="font-black text-xl">{sessionCorrect}</span>
+                    </div>
+                    <div className="bg-red-50 p-2 rounded-xl flex items-center justify-center gap-2 text-red-700 border border-red-200">
+                      <XCircle size={20}/>
+                      <span className="font-black text-xl">{sessionWrong}</span>
                     </div>
                   </div>
 
@@ -797,6 +871,10 @@ const App = () => {
         <div className="flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0">
           <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察 (Live Monitor)</h2>
           <div className="flex gap-4">
+            {/* CSV DOWNLOAD BUTTON */}
+            <button onClick={downloadCSV} className="flex items-center gap-2 bg-green-100 text-green-700 px-4 py-3 rounded-xl font-bold hover:bg-green-200 transition-colors">
+              <FileDown size={20}/> 下載報表 (CSV)
+            </button>
             <button onClick={handleResetAll} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
               <RotateCcw size={20}/> 重設所有分數
             </button>
