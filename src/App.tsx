@@ -1,7 +1,7 @@
 // @ts-nocheck
-// P.3 理財數學王 v4.2 (Wide Screen Fix)
+// P.3 理財數學王 v4.3 (iPad Landscape Optimized)
 // Date: 2026-01-14
-// Fixes: Removed Vercel Login (Instruction only), Forced Wide UI layout (95vw)
+// Fixes: Split-screen layout for Game View (Left: Question, Right: Controls), optimized for iPad 1024px+ width.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -23,7 +23,6 @@ const userFirebaseConfig = {
   appId: "1:330710509952:web:99966ad83282621c497965"
 };
 
-// Vercel / TypeScript Fix: Use window as any
 const firebaseConfig = (window).__firebase_config 
   ? JSON.parse((window).__firebase_config) 
   : userFirebaseConfig;
@@ -36,7 +35,7 @@ const appId = (window).__app_id || 'p3-math-finance-v4-accum';
 // --- 2. Constants ---
 const TEACHER_PWD = "26754411!";
 const NET_PWD = "english_please";
-const GAME_DURATION = 300; // 5 Minutes (300s)
+const GAME_DURATION = 300; // 5 Minutes
 
 const SHOPS = [
   { id: 'A', name_zh: 'A店 (快樂找換)', name_en: 'Shop A (Happy Exchange)', rate: 2, color: 'bg-emerald-600' },
@@ -44,19 +43,18 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600' }
 ];
 
-// --- 3. Smart Question Generator (Dynamic) ---
+// --- 3. Smart Question Generator ---
 const generateQuestion = (difficulty) => {
   const types = ['mul', 'div', 'app', 'logic'];
   const type = types[Math.floor(Math.random() * (difficulty === 'high' ? 4 : 3))]; 
    
   let q = "", a = 0, score = 0, penalty = 0;
 
-  // --- LOW ---
   if (difficulty === 'low') {
     score = 5; penalty = 2;
     if (type === 'mul') {
-      const n1 = Math.floor(Math.random() * 80) + 10; // 10-89
-      const n2 = Math.floor(Math.random() * 8) + 2;   // 2-9
+      const n1 = Math.floor(Math.random() * 80) + 10; 
+      const n2 = Math.floor(Math.random() * 8) + 2;   
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
     } else if (type === 'div') {
@@ -72,12 +70,10 @@ const generateQuestion = (difficulty) => {
       q = `每個${item}售 $${p}，買 ${c} 個需付多少元？`;
       a = p * c;
     }
-  } 
-  // --- MID ---
-  else if (difficulty === 'mid') {
+  } else if (difficulty === 'mid') {
     score = 10; penalty = 5;
     if (type === 'mul') {
-      const n1 = Math.floor(Math.random() * 300) + 100; // 100-399
+      const n1 = Math.floor(Math.random() * 300) + 100;
       const n2 = Math.floor(Math.random() * 8) + 2;
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
@@ -87,14 +83,12 @@ const generateQuestion = (difficulty) => {
       q = `將 ${ans * n2} 粒糖果平均分給 ${n2} 人，每人得多少粒？`;
       a = ans;
     } else {
-      const n1 = Math.floor(Math.random() * 10) + 80; // 80-89
-      const n2 = Math.floor(Math.random() * 3) + 7;   // 7-9
+      const n1 = Math.floor(Math.random() * 10) + 80; 
+      const n2 = Math.floor(Math.random() * 3) + 7;   
       q = `估算：${n1} × ${n2} 的結果約是多少？(取百位整數)`;
       a = Math.round((n1 * n2) / 100) * 100;
     }
-  } 
-  // --- HIGH ---
-  else {
+  } else {
     score = 20; penalty = 10;
     if (type === 'mul') {
       const n1 = Math.floor(Math.random() * 5) + 2;
@@ -230,9 +224,9 @@ const App = () => {
   const [answer, setAnswer] = useState('');
   const [feedback, setFeedback] = useState(null);
   const [gameActive, setGameActive] = useState(false);
-  const [strikes, setStrikes] = useState(0); // Track wrong attempts per question
-  const [sessionScore, setSessionScore] = useState(0); // Score for this session
-  const [totalAccumulatedScore, setTotalAccumulatedScore] = useState(0); // From DB
+  const [strikes, setStrikes] = useState(0); 
+  const [sessionScore, setSessionScore] = useState(0); 
+  const [totalAccumulatedScore, setTotalAccumulatedScore] = useState(0); 
 
   // Teacher State
   const [teacherPwd, setTeacherPwd] = useState('');
@@ -261,7 +255,7 @@ const App = () => {
     return map;
   }, [allStudents]);
 
-  // Auth: Use Anonymous Sign-In ONLY (Robust)
+  // Auth
   useEffect(() => {
     const init = async () => {
       try {
@@ -303,9 +297,8 @@ const App = () => {
   }, [user, view]);
 
   // --- Logic ---
-
   const startGame = async () => {
-    if (!user || !currentStudent) return; // Guard
+    if (!user || !currentStudent) return; 
     setGameActive(true);
     setSessionScore(0);
     setStrikes(0);
@@ -327,7 +320,7 @@ const App = () => {
         name_en: currentStudent.name_en,
         class: currentStudent.class,
         status: 'playing',
-        score: prevScore, // Keep existing score
+        score: prevScore, 
         redeemed: snap.exists() ? snap.data().redeemed : false,
         timestamp: serverTimestamp()
       }, { merge: true });
@@ -342,7 +335,6 @@ const App = () => {
     const correct = parseFloat(answer) === currentQuestion.a;
     
     if (correct) {
-      // Correct!
       const gained = currentQuestion.score;
       setSessionScore(s => s + gained);
       setTotalAccumulatedScore(s => s + gained); 
@@ -362,7 +354,6 @@ const App = () => {
       }, 800);
 
     } else {
-      // Wrong!
       const newStrikes = strikes + 1;
       setStrikes(newStrikes);
 
@@ -371,7 +362,6 @@ const App = () => {
         setAnswer(''); 
         setTimeout(() => setFeedback(null), 1000);
       } else {
-        // 3 Strikes: Penalty
         const penalty = currentQuestion.penalty;
         setSessionScore(s => s - penalty); 
         setTotalAccumulatedScore(s => Math.max(0, s - penalty));
@@ -421,18 +411,18 @@ const App = () => {
     <div className="min-h-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4">
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.2</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.3</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
-      {/* FIX: 使用 90% 螢幕寬度 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-[90%] max-w-[1200px]">
-        <button onClick={() => setView('student')} className="p-8 bg-white rounded-3xl shadow-xl border-b-8 border-orange-200 hover:scale-105 transition-all text-center group">
+      {/* Landscape Optimized: Wider Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-[95vw] max-w-7xl">
+        <button onClick={() => setView('student')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-orange-200 hover:scale-105 transition-all text-center group">
           <User size={48} className="mx-auto text-orange-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是學生</h2>
         </button>
-        <button onClick={() => setView('teacher_login')} className="p-8 bg-white rounded-3xl shadow-xl border-b-8 border-indigo-200 hover:scale-105 transition-all text-center group">
+        <button onClick={() => setView('teacher_login')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-indigo-200 hover:scale-105 transition-all text-center group">
           <BarChart3 size={48} className="mx-auto text-indigo-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是老師</h2>
         </button>
-        <button onClick={() => setView('net_login')} className="p-8 bg-white rounded-3xl shadow-xl border-b-8 border-purple-200 hover:scale-105 transition-all text-center group">
+        <button onClick={() => setView('net_login')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-purple-200 hover:scale-105 transition-all text-center group">
           <Languages size={48} className="mx-auto text-purple-500 mb-2 group-hover:scale-110 transition-transform"/>
           <h2 className="text-2xl font-black text-slate-700">NET</h2>
         </button>
@@ -443,90 +433,111 @@ const App = () => {
   // Student
   if (view === 'student') return (
     <div className="min-h-screen bg-orange-50 p-4">
-      {/* FIX: 使用 w-full 和 max-w-[95vw] 確保佔滿螢幕 */}
-      <div className="w-full max-w-[95vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 min-h-[600px]">
-        <div className="bg-orange-500 p-4 text-white flex justify-between items-center">
+      {/* Landscape Optimized: Full Width Container */}
+      <div className="w-full h-[calc(100vh-2rem)] max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 flex flex-col">
+        <div className="bg-orange-500 p-4 text-white flex justify-between items-center shrink-0">
           <button onClick={() => setView('home')}><ArrowLeft/></button>
           <h2 className="font-bold">比賽專區</h2>
           <div className="w-6"></div>
         </div>
-        <div className="p-6">
+        <div className="p-6 flex-grow overflow-y-auto">
            {studentView === 'class_select' && (
-            <div className="grid grid-cols-2 gap-4">
-              {['3A','3B','3C','3D'].map(c => <button key={c} onClick={() => {setSelectedClass(c); setStudentView('name_select');}} className="py-8 bg-orange-50 hover:bg-orange-500 hover:text-white rounded-2xl text-3xl font-black border-2 border-orange-100">{c}</button>)}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 h-full items-center">
+              {['3A','3B','3C','3D'].map(c => <button key={c} onClick={() => {setSelectedClass(c); setStudentView('name_select');}} className="h-48 md:h-64 bg-orange-50 hover:bg-orange-500 hover:text-white rounded-3xl text-5xl font-black border-4 border-orange-100 transition-colors shadow-sm">{c}</button>)}
             </div>
           )}
 
           {studentView === 'name_select' && (
-            <div className="space-y-4">
-              <button onClick={() => setStudentView('class_select')}>Back</button>
-              <h3 className="text-2xl font-black">Select Name</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-[60vh] overflow-y-auto">
-                {studentsByClass[selectedClass]?.map(s => <button key={s.id} onClick={() => {setCurrentStudent(s); setStudentView('difficulty');}} className="p-4 bg-slate-50 hover:bg-orange-100 rounded-xl text-left border font-bold">{s.name_zh}</button>)}
+            <div className="space-y-4 h-full flex flex-col">
+              <div className="flex justify-between items-center">
+                <button onClick={() => setStudentView('class_select')} className="px-4 py-2 bg-slate-100 rounded-lg font-bold">Back</button>
+                <h3 className="text-2xl font-black">Select Name</h3>
+                <div className="w-16"></div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 overflow-y-auto p-2">
+                {studentsByClass[selectedClass]?.map(s => <button key={s.id} onClick={() => {setCurrentStudent(s); setStudentView('difficulty');}} className="p-4 bg-slate-50 hover:bg-orange-100 rounded-xl text-left border font-bold text-lg">{s.name_zh}</button>)}
               </div>
             </div>
           )}
 
           {studentView === 'difficulty' && (
-            <div className="space-y-4 text-center max-w-2xl mx-auto">
-              <h3 className="text-2xl font-black">選擇挑戰難度</h3>
-              <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="w-full p-6 bg-green-100 border-2 border-green-300 rounded-2xl text-xl font-black text-green-800">
-                初級 (Low)<br/><span className="text-sm font-bold">每題 5 分 (扣 2 分)</span>
-              </button>
-              <button onClick={() => {setDifficulty('mid'); setStudentView('intro');}} className="w-full p-6 bg-blue-100 border-2 border-blue-300 rounded-2xl text-xl font-black text-blue-800">
-                中級 (Mid)<br/><span className="text-sm font-bold">每題 10 分 (扣 5 分)</span>
-              </button>
-              <button onClick={() => {setDifficulty('high'); setStudentView('intro');}} className="w-full p-6 bg-purple-100 border-2 border-purple-300 rounded-2xl text-xl font-black text-purple-800">
-                高級 (High)<br/><span className="text-sm font-bold">每題 20 分 (扣 10 分)</span>
-              </button>
+            <div className="h-full flex flex-col justify-center items-center space-y-6">
+              <h3 className="text-3xl font-black">選擇挑戰難度</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl">
+                <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="p-10 bg-green-100 border-4 border-green-300 rounded-3xl text-2xl font-black text-green-800 hover:scale-105 transition-transform shadow-lg">
+                  初級 (Low)<br/><span className="text-lg font-bold mt-2 block">每題 5 分<br/>(扣 2 分)</span>
+                </button>
+                <button onClick={() => {setDifficulty('mid'); setStudentView('intro');}} className="p-10 bg-blue-100 border-4 border-blue-300 rounded-3xl text-2xl font-black text-blue-800 hover:scale-105 transition-transform shadow-lg">
+                  中級 (Mid)<br/><span className="text-lg font-bold mt-2 block">每題 10 分<br/>(扣 5 分)</span>
+                </button>
+                <button onClick={() => {setDifficulty('high'); setStudentView('intro');}} className="p-10 bg-purple-100 border-4 border-purple-300 rounded-3xl text-2xl font-black text-purple-800 hover:scale-105 transition-transform shadow-lg">
+                  高級 (High)<br/><span className="text-lg font-bold mt-2 block">每題 20 分<br/>(扣 10 分)</span>
+                </button>
+              </div>
             </div>
           )}
 
           {studentView === 'intro' && (
-            <div className="text-center py-10 space-y-6">
-              <h2 className="text-4xl font-black">Ready?</h2>
-              <p className="text-xl font-bold">5 分鐘限時挑戰！<br/>答錯 3 次會扣分喔！</p>
-              <button onClick={() => {setStudentView('play'); startGame();}} className="px-10 py-4 bg-orange-500 text-white rounded-full text-2xl font-black animate-pulse shadow-xl hover:scale-105 transition-transform"><Play fill="currentColor" className="inline mr-2"/> START</button>
+            <div className="h-full flex flex-col justify-center items-center space-y-8">
+              <h2 className="text-6xl font-black text-slate-800">Ready?</h2>
+              <p className="text-3xl font-bold text-slate-500">5 分鐘限時挑戰！<br/>答錯 3 次會扣分喔！</p>
+              <button onClick={() => {setStudentView('play'); startGame();}} className="px-16 py-6 bg-orange-500 text-white rounded-full text-4xl font-black animate-pulse shadow-xl hover:scale-105 transition-transform"><Play size={36} fill="currentColor" className="inline mr-3"/> START</button>
             </div>
           )}
 
+          {/* GAME VIEW - LANDSCAPE SPLIT SCREEN */}
           {studentView === 'play' && currentQuestion && (
-            <div className="space-y-6 max-w-5xl mx-auto">
-              <div className="flex justify-between items-center bg-slate-100 p-3 rounded-xl">
-                <div className="flex items-center gap-2 text-rose-600 font-black text-xl"><Timer/> {Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</div>
-                <div className="flex items-center gap-2 text-orange-500 font-black text-xl"><Coins/> {totalAccumulatedScore}</div>
-              </div>
-              
-              <div className="bg-white border-4 border-slate-100 p-12 rounded-3xl min-h-[250px] flex flex-col items-center justify-center text-center relative">
-                {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-3 py-1 rounded-lg">錯誤: {strikes}/3</span>}
-                <p className="text-4xl md:text-5xl font-bold text-slate-800 leading-relaxed">{currentQuestion.q}</p>
+            <div className="flex flex-col md:flex-row gap-6 h-full items-stretch">
+              {/* Left Column: Question */}
+              <div className="w-full md:w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
+                {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
+                <p className="text-5xl md:text-7xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
               </div>
 
-              {feedback && <div className={`p-4 rounded-xl text-center font-black text-xl ${feedback.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{feedback.msg}</div>}
+              {/* Right Column: Controls */}
+              <div className="w-full md:w-1/3 flex flex-col gap-4">
+                {/* Stats */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-rose-100 p-4 rounded-2xl flex flex-col items-center justify-center text-rose-700">
+                    <Timer size={32} className="mb-1"/>
+                    <span className="text-2xl font-black">{Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</span>
+                  </div>
+                  <div className="bg-orange-100 p-4 rounded-2xl flex flex-col items-center justify-center text-orange-700">
+                    <Coins size={32} className="mb-1"/>
+                    <span className="text-2xl font-black">{totalAccumulatedScore}</span>
+                  </div>
+                </div>
 
-              <form onSubmit={submitAnswer} className="flex gap-4">
-                <input type="number" autoFocus value={answer} onChange={e => setAnswer(e.target.value)} className="flex-1 p-6 rounded-2xl border-4 border-slate-200 text-4xl text-center font-black outline-none focus:border-orange-400 transition-colors" placeholder="?"/>
-                <button type="submit" className="px-10 bg-orange-500 text-white rounded-2xl font-black text-xl hover:bg-orange-600 transition-colors shadow-lg">GO</button>
-              </form>
+                {/* Feedback Area */}
+                <div className="flex-1 flex items-center justify-center min-h-[80px]">
+                   {feedback && <div className={`w-full p-4 rounded-2xl text-center font-black text-xl animate-bounce ${feedback.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{feedback.msg}</div>}
+                </div>
+
+                {/* Input */}
+                <form onSubmit={submitAnswer} className="flex flex-col gap-4">
+                  <input type="number" autoFocus value={answer} onChange={e => setAnswer(e.target.value)} className="w-full p-6 rounded-2xl border-4 border-slate-300 text-5xl text-center font-black outline-none focus:border-orange-500 transition-colors shadow-sm" placeholder="?"/>
+                  <button type="submit" className="w-full py-6 bg-slate-800 text-white rounded-2xl font-black text-3xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
+                </form>
+              </div>
             </div>
           )}
 
           {studentView === 'result' && (
-            <div className="text-center py-10 space-y-6 animate-in zoom-in">
-              <Trophy size={80} className="text-yellow-400 mx-auto"/>
-              <h2 className="text-4xl font-black">時間到！</h2>
-              <div className="grid grid-cols-2 gap-4 max-w-lg mx-auto">
-                <div className="p-4 bg-slate-50 rounded-2xl border">
-                  <p className="text-xs text-slate-400 font-bold">本局得分</p>
-                  <p className="text-3xl font-black text-slate-700">{sessionScore}</p>
+            <div className="h-full flex flex-col justify-center items-center space-y-8 animate-in zoom-in">
+              <Trophy size={100} className="text-yellow-400 mx-auto drop-shadow-lg"/>
+              <h2 className="text-5xl font-black">時間到！</h2>
+              <div className="grid grid-cols-2 gap-8 w-full max-w-2xl">
+                <div className="p-8 bg-slate-50 rounded-3xl border shadow-sm text-center">
+                  <p className="text-sm text-slate-400 font-bold mb-2">本局得分</p>
+                  <p className="text-5xl font-black text-slate-700">{sessionScore}</p>
                 </div>
-                <div className="p-4 bg-orange-50 rounded-2xl border-2 border-orange-200">
-                  <p className="text-xs text-orange-400 font-bold">累積總分</p>
-                  <p className="text-3xl font-black text-orange-600">{totalAccumulatedScore}</p>
+                <div className="p-8 bg-orange-50 rounded-3xl border-2 border-orange-200 shadow-sm text-center">
+                  <p className="text-sm text-orange-400 font-bold mb-2">累積總分</p>
+                  <p className="text-5xl font-black text-orange-600">{totalAccumulatedScore}</p>
                 </div>
               </div>
-              <p className="font-bold text-slate-400">Go to Exchange Shop!</p>
-              <button onClick={() => setView('home')} className="text-slate-400 font-bold underline">Back Home</button>
+              <p className="font-bold text-slate-400 text-xl">Go to Exchange Shop!</p>
+              <button onClick={() => setView('home')} className="text-slate-400 font-bold underline text-lg">Back Home</button>
             </div>
           )}
         </div>
@@ -537,26 +548,25 @@ const App = () => {
   // NET
   if (view === 'net_login') return (
     <div className="min-h-screen bg-purple-50 flex items-center justify-center p-4">
-      <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full text-center space-y-4">
-        <h2 className="text-2xl font-black">NET Login</h2>
-        <input type="password" value={netPwd} onChange={e => setNetPwd(e.target.value)} className="w-full p-4 border rounded-xl text-center" placeholder="Password"/>
-        <button onClick={() => { if(netPwd === NET_PWD) setView('net'); else alert('Wrong Password'); }} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold">Enter</button>
-        <button onClick={() => setView('home')} className="text-slate-400">Back</button>
+      <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
+        <h2 className="text-3xl font-black">NET Login</h2>
+        <input type="password" value={netPwd} onChange={e => setNetPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
+        <button onClick={() => { if(netPwd === NET_PWD) setView('net'); else alert('Wrong Password'); }} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-bold text-xl hover:bg-purple-700">Enter</button>
+        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
       </div>
     </div>
   );
 
   if (view === 'net') return (
     <div className="min-h-screen bg-slate-50 p-4">
-      {/* FIX: 加寬 NET 介面 */}
-      <div className="w-full max-w-[95vw] mx-auto bg-white rounded-[2rem] shadow-xl border-b-8 border-purple-200 min-h-[800px]">
+      <div className="w-full max-w-[95vw] mx-auto bg-white rounded-[2rem] shadow-xl border-b-8 border-purple-200 min-h-[90vh]">
         <div className="bg-purple-600 p-6 text-white flex justify-between items-center">
-          <h2 className="font-bold text-lg">NET Exchange</h2>
-          <button onClick={() => setView('home')}><LogOut/></button>
+          <h2 className="font-bold text-2xl">NET Exchange</h2>
+          <button onClick={() => setView('home')}><LogOut size={28}/></button>
         </div>
-        <div className="p-6 space-y-6">
-          <div className="flex gap-2">
-            <input type="text" value={netSearch} onChange={e => setNetSearch(e.target.value)} placeholder="Student Name" className="flex-1 p-3 border rounded-xl"/>
+        <div className="p-8 space-y-8">
+          <div className="flex gap-4">
+            <input type="text" value={netSearch} onChange={e => setNetSearch(e.target.value)} placeholder="Student Name (e.g. S9014979 or English Name)" className="flex-1 p-4 border-2 rounded-2xl text-xl"/>
             <button onClick={() => {
               const found = allStudents.find(s => s.name_en.toLowerCase().includes(netSearch.toLowerCase()) || s.name_zh === netSearch);
               if (found) {
@@ -565,41 +575,41 @@ const App = () => {
                   else setNetStudent({ ...found, score: 0 });
                 });
               } else alert('Not Found');
-            }} className="bg-purple-600 text-white p-3 rounded-xl"><Search/></button>
+            }} className="bg-purple-600 text-white px-8 rounded-2xl hover:bg-purple-700"><Search size={28}/></button>
           </div>
           
           {netStudent && (
-            <div className="space-y-6 animate-in slide-in-from-bottom-4">
-              <div className="bg-purple-50 p-6 rounded-2xl border-2 border-purple-100">
-                <div className="flex justify-between items-start">
+            <div className="space-y-8 animate-in slide-in-from-bottom-4">
+              <div className="bg-purple-50 p-8 rounded-3xl border-4 border-purple-100 shadow-sm">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                   <div>
-                    <p className="text-2xl font-black text-slate-800">{netStudent.name_en}</p>
-                    <p className="font-bold text-slate-400">{netStudent.class} {netStudent.name_zh}</p>
+                    <p className="text-4xl font-black text-slate-800">{netStudent.name_en}</p>
+                    <p className="text-xl font-bold text-slate-400 mt-2">{netStudent.class} {netStudent.name_zh}</p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs font-bold text-purple-400">COINS</p>
-                    <p className="text-4xl font-black text-purple-600">{netStudent.score}</p>
+                  <div className="text-right bg-white p-4 rounded-2xl shadow-sm min-w-[200px]">
+                    <p className="text-sm font-bold text-purple-400">AVAILABLE COINS</p>
+                    <p className="text-5xl font-black text-purple-600">{netStudent.score}</p>
                   </div>
                 </div>
                 {netStudent.redeemed && (
-                  <div className="mt-4 flex flex-col items-center bg-green-100 text-green-700 p-3 rounded-xl font-bold">
-                    <CheckCircle2/>
-                    <span>ALREADY REDEEMED</span>
+                  <div className="mt-6 flex flex-col items-center bg-green-100 text-green-700 p-4 rounded-2xl font-bold border-2 border-green-200">
+                    <CheckCircle2 size={32} className="mb-2"/>
+                    <span className="text-xl">ALREADY REDEEMED</span>
                   </div>
                 )}
               </div>
 
               {!netStudent.redeemed && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <p className="font-bold text-slate-400 col-span-full">Select Shop Rate:</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <p className="font-bold text-slate-400 col-span-full text-xl">Select Exchange Shop:</p>
                   {SHOPS.map(shop => (
-                    <button key={shop.id} onClick={() => setSelectedShop(shop)} className={`p-4 rounded-xl border-2 text-left transition-all ${selectedShop?.id === shop.id ? 'border-purple-600 bg-purple-50' : 'border-slate-100 hover:border-purple-200'}`}>
+                    <button key={shop.id} onClick={() => setSelectedShop(shop)} className={`p-6 rounded-2xl border-4 text-left transition-all shadow-sm ${selectedShop?.id === shop.id ? 'border-purple-600 bg-purple-50 scale-105' : 'border-slate-100 hover:border-purple-200 bg-white'}`}>
                       <div className="flex justify-between items-center">
                         <div>
-                          <p className="font-black text-slate-700">{shop.name_en}</p>
-                          <p className="text-xs text-slate-400">{shop.name_zh}</p>
+                          <p className="font-black text-2xl text-slate-700 mb-1">{shop.name_en}</p>
+                          <p className="text-sm text-slate-400 font-bold">{shop.name_zh}</p>
                         </div>
-                        <div className={`px-3 py-1 rounded-full text-white font-bold text-sm ${shop.color}`}>x{shop.rate}</div>
+                        <div className={`px-4 py-2 rounded-xl text-white font-bold text-xl ${shop.color}`}>x{shop.rate}</div>
                       </div>
                     </button>
                   ))}
@@ -607,10 +617,10 @@ const App = () => {
               )}
 
               {selectedShop && !netStudent.redeemed && (
-                <div className="bg-slate-800 text-white p-6 rounded-2xl text-center space-y-2">
-                  <p className="text-sm font-bold text-slate-400">TOTAL EXCHANGE (HKD)</p>
-                  <p className="text-6xl font-black">${netStudent.score * selectedShop.rate}</p>
-                  <button onClick={redeem} className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 rounded-xl font-bold mt-2">CONFIRM REDEEM</button>
+                <div className="bg-slate-800 text-white p-8 rounded-3xl text-center space-y-4 shadow-xl">
+                  <p className="text-lg font-bold text-slate-400">TOTAL EXCHANGE VALUE (HKD)</p>
+                  <p className="text-8xl font-black text-emerald-400">${netStudent.score * selectedShop.rate}</p>
+                  <button onClick={redeem} className="w-full py-5 bg-emerald-500 hover:bg-emerald-600 rounded-2xl font-black text-2xl mt-4 shadow-lg hover:shadow-emerald-500/50 transition-all">CONFIRM REDEEM</button>
                 </div>
               )}
             </div>
@@ -623,49 +633,49 @@ const App = () => {
   // Teacher
   if (view === 'teacher_login') return (
     <div className="min-h-screen bg-indigo-50 flex items-center justify-center p-4">
-      <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full text-center space-y-4">
-        <h2 className="text-2xl font-black">老師後台</h2>
-        <input type="password" value={teacherPwd} onChange={e => setTeacherPwd(e.target.value)} className="w-full p-4 border rounded-xl text-center" placeholder="Password"/>
+      <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
+        <h2 className="text-3xl font-black">老師後台</h2>
+        <input type="password" value={teacherPwd} onChange={e => setTeacherPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
         <button onClick={() => { 
           if(teacherPwd === TEACHER_PWD) {
             setView('teacher');
           } else {
             alert('密碼錯誤 (Wrong Password)');
           }
-        }} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">Login</button>
-        <button onClick={() => setView('home')} className="text-slate-400">Back</button>
+        }} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-xl hover:bg-indigo-700">Login</button>
+        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
       </div>
     </div>
   );
 
   if (view === 'teacher') return (
     <div className="min-h-screen bg-slate-100 p-4 font-sans">
-      <div className="max-w-[95vw] mx-auto">
-        <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm">
-          <h2 className="text-2xl font-black text-indigo-700 flex items-center gap-2"><BarChart3/> 實時監察</h2>
-          <button onClick={() => setView('home')} className="bg-slate-100 p-2 rounded-lg text-slate-500"><LogOut/></button>
+      <div className="w-full max-w-[95vw] mx-auto">
+        <div className="flex justify-between items-center mb-6 bg-white p-6 rounded-3xl shadow-sm">
+          <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察</h2>
+          <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           {['3A','3B','3C','3D'].map(cls => (
-            <div key={cls} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-              <h3 className="font-black text-slate-700 mb-2 border-b pb-2">{cls}</h3>
-              <div className="space-y-2 max-h-[600px] overflow-y-auto">
+            <div key={cls} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-[75vh]">
+              <h3 className="font-black text-2xl text-slate-700 mb-4 border-b pb-4">{cls}</h3>
+              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
                 {liveData.filter(d => d.class === cls).map(s => (
-                  <div key={s.id} className={`p-2 rounded-lg border flex justify-between items-center ${s.redeemed ? 'bg-green-50 border-green-200' : 'bg-white border-slate-100'}`}>
+                  <div key={s.id} className={`p-3 rounded-xl border-2 flex justify-between items-center ${s.redeemed ? 'bg-green-50 border-green-200' : 'bg-white border-slate-100'}`}>
                     <div>
-                      <span className="font-bold text-sm block">{s.name}</span>
-                      <span className="text-[10px] text-slate-400">{s.status === 'playing' ? '進行中...' : (s.redeemed ? '已兌換' : '待兌換')}</span>
+                      <span className="font-bold text-md block">{s.name}</span>
+                      <span className="text-xs text-slate-400 font-bold">{s.status === 'playing' ? '🔥 進行中...' : (s.redeemed ? '✅ 已兌換' : '⭕ 待兌換')}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {editingId === s.id ? (
-                        <div className="flex gap-1">
-                          <input type="number" className="w-12 border rounded text-center text-sm" value={editScoreVal} onChange={e => setEditScoreVal(e.target.value)} />
-                          <button onClick={() => saveEdit(s.id)}><Save size={14} className="text-blue-600"/></button>
+                        <div className="flex gap-2">
+                          <input type="number" className="w-16 border rounded p-1 text-center font-bold" value={editScoreVal} onChange={e => setEditScoreVal(e.target.value)} />
+                          <button onClick={() => saveEdit(s.id)}><Save size={20} className="text-blue-600"/></button>
                         </div>
                       ) : (
                         <>
-                          <span className="font-black text-indigo-600">{s.score}</span>
-                          <button onClick={() => { setEditingId(s.id); setEditScoreVal(s.score); }}><Edit size={12} className="text-slate-300 hover:text-indigo-500"/></button>
+                          <span className="font-black text-xl text-indigo-600">{s.score}</span>
+                          <button onClick={() => { setEditingId(s.id); setEditScoreVal(s.score); }}><Edit size={16} className="text-slate-300 hover:text-indigo-500"/></button>
                         </>
                       )}
                     </div>
