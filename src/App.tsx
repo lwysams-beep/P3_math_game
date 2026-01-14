@@ -1,11 +1,11 @@
 // @ts-nocheck
-// P.3 理財數學王 v6.1 (High Difficulty Overhaul)
+// P.3 理財數學王 v6.2 (Curriculum-Based Diverse Word Problems)
 // Date: 2026-01-14
 // Fixes: 
-// 1. "High" Difficulty is now 100% Word Problems (No pure calculations).
-// 2. Implemented "No Repeat Type" logic for High Difficulty (5 distinct subtypes).
-// 3. Subtypes: Shopping, Sharing, Change, Mixed Items, Savings.
-// 4. Retained 2:1 Calc/App ratio for Low/Mid difficulties.
+// 1. "High" Difficulty massively expanded beyond money.
+// 2. Added Curriculum Topics: Length (cm/m), Weight (g/kg), General Quantity, Leftover Logic.
+// 3. Implemented 9 distinct question subtypes with strict no-repeat logic.
+// 4. Retained all previous features (Data, Admin, Offline mode).
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -48,7 +48,7 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Smart Question Generator (v6.1 Logic) ---
+// --- 3. Smart Question Generator (v6.2 Logic) ---
 
 const ITEMS_DB = [
   { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
@@ -193,24 +193,28 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
     } 
     
     // ==========================================
-    // HIGH DIFFICULTY (ALL WORD PROBLEMS, NO REPEAT TYPE)
+    // HIGH DIFFICULTY (DIVERSE CURRICULUM WORD PROBLEMS)
     // ==========================================
     else { 
       score = 20; penalty = 10;
       category = 'app'; // All are applications
 
-      // Available types for High Difficulty
-      // We filter out the 'lastType' to ensure non-repetition
-      const HIGH_TYPES = ['shopping', 'sharing', 'change', 'mixed', 'savings'];
+      // Expanded types: 4 Money + 5 Non-Money
+      const HIGH_TYPES = [
+          'shopping', 'change', 'mixed_money', 'savings', // Money
+          'length', 'weight', 'general_mul', 'general_div', 'leftover' // Non-Money
+      ];
+      
+      // Ensure we don't repeat the exact same TYPE of problem
       const availableTypes = HIGH_TYPES.filter(t => t !== lastType);
       const chosenType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
       
-      subType = chosenType; // Track this for next round
+      subType = chosenType; 
 
       const item = getRandomItem();
 
+      // --- MONEY TYPES ---
       if (chosenType === 'shopping') {
-          // Large number shopping
           const count = randomInt(6, 15);
           const price = randomInt(45, 120);
           q = `學校訂購了 ${count} ${item.unit}${item.name}，每${item.unit}價值 $${price}。學校共需支付多少元？`;
@@ -218,55 +222,83 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
           hint = `數字較大，請小心用直式乘法：$${price} × ${count}`;
           signature = `high-shop-${price}-${count}`;
 
-      } else if (chosenType === 'sharing') {
-          // Large number sharing
-          const totalMoney = randomInt(20, 80) * 10 + randomInt(0, 9) * 5; // e.g. 245
-          const people = randomInt(4, 8);
-          const grandTotal = totalMoney - (totalMoney % people); // Make exact
-          q = `將 $${grandTotal} 獎學金平均分給 ${people} 位優異生，每人可得多少元？`;
-          a = grandTotal / people;
-          hint = `平均分配大數額，請用長除法：${grandTotal} ÷ ${people}`;
-          signature = `high-share-${grandTotal}-${people}`;
-
       } else if (chosenType === 'change') {
-          // Buying and Change
-          const wallet = randomInt(5, 10) * 100; // 500, 600...
+          const wallet = randomInt(5, 10) * 100;
           const count = randomInt(3, 6);
           const price = randomInt(45, 85);
           const cost = price * count;
-          
-          if (cost >= wallet) { // Safety fallback
-             q = `爸爸有 $${wallet}，想買 ${count} ${item.unit}${item.name} (每${item.unit} $${price})，還欠多少元？`;
-             a = cost - wallet;
-             hint = `先算總價 $${price}×${count}，再減去 $${wallet}。`;
+          if (cost >= wallet) {
+             q = `爸爸想買 ${count} ${item.unit}${item.name} (每${item.unit} $${price})，需付多少元？`;
+             a = cost;
+             hint = `總價 = 單價 × 數量。`;
           } else {
              q = `爸爸有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。應找回多少元？`;
              a = wallet - cost;
-             hint = `這題有兩步：\n1. 先算總花費 ($${price} × ${count})\n2. 再用 $${wallet} 減去花費。`;
+             hint = `這題有兩步：1. 先算總花費 2. 再用 $${wallet} 減去花費。`;
           }
           signature = `high-change-${wallet}-${price}-${count}`;
 
-      } else if (chosenType === 'mixed') {
-          // Mixed items
+      } else if (chosenType === 'mixed_money') {
           const item2 = ITEMS_DB[(ITEMS_DB.indexOf(item) + 3) % ITEMS_DB.length];
           const p1 = randomInt(25, 60);
           const p2 = randomInt(15, 40);
           const qty1 = randomInt(2, 5);
           const qty2 = randomInt(2, 4);
-          
           q = `買 ${qty1} ${item.unit}${item.name} (每${item.unit}$${p1}) 和 ${qty2} ${item2.unit}${item2.name} (每${item2.unit}$${p2})，共需付多少元？`;
           a = (p1 * qty1) + (p2 * qty2);
-          hint = `混合題：\n1. 算${item.name}總價\n2. 算${item2.name}總價\n3. 將兩者相加。`;
+          hint = `混合題：先分開算兩種物品的總價，再相加。`;
           signature = `high-mix-${p1}-${qty1}-${p2}-${qty2}`;
 
       } else if (chosenType === 'savings') {
-          // Long term savings
           const weeks = randomInt(4, 12);
           const weeklySaving = randomInt(50, 150);
           q = `小明每星期儲蓄 $${weeklySaving}，${weeks} 星期後他共儲蓄了多少元？`;
           a = weeklySaving * weeks;
           hint = `每星期存 $${weeklySaving}，存了 ${weeks} 次，用乘法。`;
           signature = `high-save-${weeklySaving}-${weeks}`;
+      }
+
+      // --- NON-MONEY TYPES (CURRICULUM BASED) ---
+      else if (chosenType === 'length') {
+          const len = randomInt(15, 45); // cm
+          const count = randomInt(4, 9);
+          q = `一條絲帶長 ${len} 厘米，老師買了 ${count} 條，共有多少厘米？`;
+          a = len * count;
+          hint = `每條長 ${len} cm，有 ${count} 條，用乘法求總長度。`;
+          signature = `high-len-${len}-${count}`;
+
+      } else if (chosenType === 'weight') {
+          const weight = randomInt(120, 250); // g
+          const count = randomInt(3, 6);
+          q = `一個蘋果重 ${weight} 克，${count} 個蘋果共重多少克？`;
+          a = weight * count;
+          hint = `單個重量 × 數量 = 總重量。`;
+          signature = `high-wgt-${weight}-${count}`;
+
+      } else if (chosenType === 'general_mul') {
+          const shelves = randomInt(4, 9);
+          const booksPerShelf = randomInt(25, 65);
+          q = `圖書館有 ${shelves} 個書架，每個書架放了 ${booksPerShelf} 本書，共有書多少本？`;
+          a = booksPerShelf * shelves;
+          hint = `每架有 ${booksPerShelf} 本，有 ${shelves} 架，用乘法。`;
+          signature = `high-gen-mul-${booksPerShelf}-${shelves}`;
+
+      } else if (chosenType === 'general_div') {
+          const totalItems = randomInt(15, 60) * 5; // e.g., 75, 100
+          const boxes = 5;
+          q = `工廠生產了 ${totalItems} 塊餅乾，平均裝入 ${boxes} 個罐子，每罐有多少塊？`;
+          a = totalItems / boxes;
+          hint = `「平均裝入」是除法題目。`;
+          signature = `high-gen-div-${totalItems}-${boxes}`;
+
+      } else if (chosenType === 'leftover') {
+          const start = randomInt(100, 300);
+          const deduct = randomInt(10, 30);
+          const count = randomInt(3, 6);
+          q = `水桶裡有 ${start} 毫升水，倒出了 ${count} 杯，每杯 ${deduct} 毫升。水桶裡還剩下多少毫升水？`;
+          a = start - (deduct * count);
+          hint = `1. 先算倒出了多少水 (${deduct} × ${count})\n2. 再用原本的水量減去倒出的量。`;
+          signature = `high-leftover-${start}-${deduct}-${count}`;
       }
     }
 
@@ -836,7 +868,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.1</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.2</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
