@@ -1,7 +1,8 @@
 // @ts-nocheck
-// P.3 理財數學王 v4.3 (iPad Landscape Optimized)
+// P.3 理財數學王 v4.4 (Force Landscape Layout)
 // Date: 2026-01-14
-// Fixes: Split-screen layout for Game View (Left: Question, Right: Controls), optimized for iPad 1024px+ width.
+// Fixes: Enforced Grid/Flex rows for ALL views to prevent vertical stacking on iPad.
+// Optimized for iPad Landscape (1024px+).
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -408,14 +409,14 @@ const App = () => {
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
   if (view === 'home') return (
-    <div className="min-h-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4">
+    <div className="h-screen w-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4 overflow-hidden">
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.3</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.4</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
-      {/* Landscape Optimized: Wider Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-[95vw] max-w-7xl">
+      {/* FORCE GRID 3 COLS for Landscape */}
+      <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
         <button onClick={() => setView('student')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-orange-200 hover:scale-105 transition-all text-center group">
           <User size={48} className="mx-auto text-orange-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是學生</h2>
         </button>
@@ -432,29 +433,28 @@ const App = () => {
 
   // Student
   if (view === 'student') return (
-    <div className="min-h-screen bg-orange-50 p-4">
-      {/* Landscape Optimized: Full Width Container */}
-      <div className="w-full h-[calc(100vh-2rem)] max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 flex flex-col">
+    <div className="h-screen w-screen bg-orange-50 p-4 overflow-hidden">
+      <div className="w-full h-full max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 flex flex-col">
         <div className="bg-orange-500 p-4 text-white flex justify-between items-center shrink-0">
           <button onClick={() => setView('home')}><ArrowLeft/></button>
-          <h2 className="font-bold">比賽專區</h2>
+          <h2 className="font-bold">比賽專區 (Student Zone)</h2>
           <div className="w-6"></div>
         </div>
         <div className="p-6 flex-grow overflow-y-auto">
            {studentView === 'class_select' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 h-full items-center">
-              {['3A','3B','3C','3D'].map(c => <button key={c} onClick={() => {setSelectedClass(c); setStudentView('name_select');}} className="h-48 md:h-64 bg-orange-50 hover:bg-orange-500 hover:text-white rounded-3xl text-5xl font-black border-4 border-orange-100 transition-colors shadow-sm">{c}</button>)}
+            <div className="grid grid-cols-4 gap-6 h-full items-center">
+              {['3A','3B','3C','3D'].map(c => <button key={c} onClick={() => {setSelectedClass(c); setStudentView('name_select');}} className="h-64 bg-orange-50 hover:bg-orange-500 hover:text-white rounded-3xl text-6xl font-black border-4 border-orange-100 transition-colors shadow-sm">{c}</button>)}
             </div>
           )}
 
           {studentView === 'name_select' && (
             <div className="space-y-4 h-full flex flex-col">
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center shrink-0">
                 <button onClick={() => setStudentView('class_select')} className="px-4 py-2 bg-slate-100 rounded-lg font-bold">Back</button>
                 <h3 className="text-2xl font-black">Select Name</h3>
                 <div className="w-16"></div>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 overflow-y-auto p-2">
+              <div className="grid grid-cols-4 lg:grid-cols-5 gap-3 overflow-y-auto p-2">
                 {studentsByClass[selectedClass]?.map(s => <button key={s.id} onClick={() => {setCurrentStudent(s); setStudentView('difficulty');}} className="p-4 bg-slate-50 hover:bg-orange-100 rounded-xl text-left border font-bold text-lg">{s.name_zh}</button>)}
               </div>
             </div>
@@ -463,14 +463,14 @@ const App = () => {
           {studentView === 'difficulty' && (
             <div className="h-full flex flex-col justify-center items-center space-y-6">
               <h3 className="text-3xl font-black">選擇挑戰難度</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl">
-                <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="p-10 bg-green-100 border-4 border-green-300 rounded-3xl text-2xl font-black text-green-800 hover:scale-105 transition-transform shadow-lg">
+              <div className="grid grid-cols-3 gap-8 w-full max-w-6xl">
+                <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="p-12 bg-green-100 border-4 border-green-300 rounded-3xl text-3xl font-black text-green-800 hover:scale-105 transition-transform shadow-lg">
                   初級 (Low)<br/><span className="text-lg font-bold mt-2 block">每題 5 分<br/>(扣 2 分)</span>
                 </button>
-                <button onClick={() => {setDifficulty('mid'); setStudentView('intro');}} className="p-10 bg-blue-100 border-4 border-blue-300 rounded-3xl text-2xl font-black text-blue-800 hover:scale-105 transition-transform shadow-lg">
+                <button onClick={() => {setDifficulty('mid'); setStudentView('intro');}} className="p-12 bg-blue-100 border-4 border-blue-300 rounded-3xl text-3xl font-black text-blue-800 hover:scale-105 transition-transform shadow-lg">
                   中級 (Mid)<br/><span className="text-lg font-bold mt-2 block">每題 10 分<br/>(扣 5 分)</span>
                 </button>
-                <button onClick={() => {setDifficulty('high'); setStudentView('intro');}} className="p-10 bg-purple-100 border-4 border-purple-300 rounded-3xl text-2xl font-black text-purple-800 hover:scale-105 transition-transform shadow-lg">
+                <button onClick={() => {setDifficulty('high'); setStudentView('intro');}} className="p-12 bg-purple-100 border-4 border-purple-300 rounded-3xl text-3xl font-black text-purple-800 hover:scale-105 transition-transform shadow-lg">
                   高級 (High)<br/><span className="text-lg font-bold mt-2 block">每題 20 分<br/>(扣 10 分)</span>
                 </button>
               </div>
@@ -479,23 +479,23 @@ const App = () => {
 
           {studentView === 'intro' && (
             <div className="h-full flex flex-col justify-center items-center space-y-8">
-              <h2 className="text-6xl font-black text-slate-800">Ready?</h2>
+              <h2 className="text-7xl font-black text-slate-800">Ready?</h2>
               <p className="text-3xl font-bold text-slate-500">5 分鐘限時挑戰！<br/>答錯 3 次會扣分喔！</p>
-              <button onClick={() => {setStudentView('play'); startGame();}} className="px-16 py-6 bg-orange-500 text-white rounded-full text-4xl font-black animate-pulse shadow-xl hover:scale-105 transition-transform"><Play size={36} fill="currentColor" className="inline mr-3"/> START</button>
+              <button onClick={() => {setStudentView('play'); startGame();}} className="px-20 py-8 bg-orange-500 text-white rounded-full text-5xl font-black animate-pulse shadow-xl hover:scale-105 transition-transform"><Play size={48} fill="currentColor" className="inline mr-3"/> START</button>
             </div>
           )}
 
           {/* GAME VIEW - LANDSCAPE SPLIT SCREEN */}
           {studentView === 'play' && currentQuestion && (
-            <div className="flex flex-col md:flex-row gap-6 h-full items-stretch">
+            <div className="flex flex-row gap-6 h-full items-stretch">
               {/* Left Column: Question */}
-              <div className="w-full md:w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
+              <div className="w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
                 {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
-                <p className="text-5xl md:text-7xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
+                <p className="text-6xl lg:text-8xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
               </div>
 
               {/* Right Column: Controls */}
-              <div className="w-full md:w-1/3 flex flex-col gap-4">
+              <div className="w-1/3 flex flex-col gap-4">
                 {/* Stats */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-rose-100 p-4 rounded-2xl flex flex-col items-center justify-center text-rose-700">
@@ -516,7 +516,7 @@ const App = () => {
                 {/* Input */}
                 <form onSubmit={submitAnswer} className="flex flex-col gap-4">
                   <input type="number" autoFocus value={answer} onChange={e => setAnswer(e.target.value)} className="w-full p-6 rounded-2xl border-4 border-slate-300 text-5xl text-center font-black outline-none focus:border-orange-500 transition-colors shadow-sm" placeholder="?"/>
-                  <button type="submit" className="w-full py-6 bg-slate-800 text-white rounded-2xl font-black text-3xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
+                  <button type="submit" className="w-full py-8 bg-slate-800 text-white rounded-2xl font-black text-4xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
                 </form>
               </div>
             </div>
@@ -558,73 +558,82 @@ const App = () => {
   );
 
   if (view === 'net') return (
-    <div className="min-h-screen bg-slate-50 p-4">
-      <div className="w-full max-w-[95vw] mx-auto bg-white rounded-[2rem] shadow-xl border-b-8 border-purple-200 min-h-[90vh]">
-        <div className="bg-purple-600 p-6 text-white flex justify-between items-center">
+    <div className="h-screen w-screen bg-slate-50 p-4 overflow-hidden">
+      <div className="w-full h-full max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl border-b-8 border-purple-200 flex flex-col">
+        <div className="bg-purple-600 p-6 text-white flex justify-between items-center shrink-0">
           <h2 className="font-bold text-2xl">NET Exchange</h2>
           <button onClick={() => setView('home')}><LogOut size={28}/></button>
         </div>
-        <div className="p-8 space-y-8">
-          <div className="flex gap-4">
-            <input type="text" value={netSearch} onChange={e => setNetSearch(e.target.value)} placeholder="Student Name (e.g. S9014979 or English Name)" className="flex-1 p-4 border-2 rounded-2xl text-xl"/>
-            <button onClick={() => {
-              const found = allStudents.find(s => s.name_en.toLowerCase().includes(netSearch.toLowerCase()) || s.name_zh === netSearch);
-              if (found) {
-                const unsub = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'scores', found.id), (doc) => {
-                  if(doc.exists()) setNetStudent({ ...found, ...doc.data() });
-                  else setNetStudent({ ...found, score: 0 });
-                });
-              } else alert('Not Found');
-            }} className="bg-purple-600 text-white px-8 rounded-2xl hover:bg-purple-700"><Search size={28}/></button>
-          </div>
+        {/* Split Screen for NET */}
+        <div className="p-8 flex-grow overflow-hidden flex flex-row gap-8">
           
-          {netStudent && (
-            <div className="space-y-8 animate-in slide-in-from-bottom-4">
-              <div className="bg-purple-50 p-8 rounded-3xl border-4 border-purple-100 shadow-sm">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                  <div>
-                    <p className="text-4xl font-black text-slate-800">{netStudent.name_en}</p>
-                    <p className="text-xl font-bold text-slate-400 mt-2">{netStudent.class} {netStudent.name_zh}</p>
-                  </div>
-                  <div className="text-right bg-white p-4 rounded-2xl shadow-sm min-w-[200px]">
-                    <p className="text-sm font-bold text-purple-400">AVAILABLE COINS</p>
-                    <p className="text-5xl font-black text-purple-600">{netStudent.score}</p>
-                  </div>
-                </div>
-                {netStudent.redeemed && (
-                  <div className="mt-6 flex flex-col items-center bg-green-100 text-green-700 p-4 rounded-2xl font-bold border-2 border-green-200">
-                    <CheckCircle2 size={32} className="mb-2"/>
-                    <span className="text-xl">ALREADY REDEEMED</span>
-                  </div>
-                )}
-              </div>
-
-              {!netStudent.redeemed && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <p className="font-bold text-slate-400 col-span-full text-xl">Select Exchange Shop:</p>
-                  {SHOPS.map(shop => (
-                    <button key={shop.id} onClick={() => setSelectedShop(shop)} className={`p-6 rounded-2xl border-4 text-left transition-all shadow-sm ${selectedShop?.id === shop.id ? 'border-purple-600 bg-purple-50 scale-105' : 'border-slate-100 hover:border-purple-200 bg-white'}`}>
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <p className="font-black text-2xl text-slate-700 mb-1">{shop.name_en}</p>
-                          <p className="text-sm text-slate-400 font-bold">{shop.name_zh}</p>
-                        </div>
-                        <div className={`px-4 py-2 rounded-xl text-white font-bold text-xl ${shop.color}`}>x{shop.rate}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {selectedShop && !netStudent.redeemed && (
-                <div className="bg-slate-800 text-white p-8 rounded-3xl text-center space-y-4 shadow-xl">
-                  <p className="text-lg font-bold text-slate-400">TOTAL EXCHANGE VALUE (HKD)</p>
-                  <p className="text-8xl font-black text-emerald-400">${netStudent.score * selectedShop.rate}</p>
-                  <button onClick={redeem} className="w-full py-5 bg-emerald-500 hover:bg-emerald-600 rounded-2xl font-black text-2xl mt-4 shadow-lg hover:shadow-emerald-500/50 transition-all">CONFIRM REDEEM</button>
-                </div>
-              )}
+          {/* Left Column: Search & Info (40%) */}
+          <div className="w-2/5 flex flex-col gap-6 overflow-y-auto">
+            <div className="flex gap-4">
+              <input type="text" value={netSearch} onChange={e => setNetSearch(e.target.value)} placeholder="Student Name / ID" className="flex-1 p-4 border-2 rounded-2xl text-xl"/>
+              <button onClick={() => {
+                const found = allStudents.find(s => s.name_en.toLowerCase().includes(netSearch.toLowerCase()) || s.name_zh === netSearch);
+                if (found) {
+                  const unsub = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'scores', found.id), (doc) => {
+                    if(doc.exists()) setNetStudent({ ...found, ...doc.data() });
+                    else setNetStudent({ ...found, score: 0 });
+                  });
+                } else alert('Not Found');
+              }} className="bg-purple-600 text-white px-6 rounded-2xl hover:bg-purple-700"><Search size={28}/></button>
             </div>
-          )}
+            
+            {netStudent && (
+               <div className="bg-purple-50 p-8 rounded-3xl border-4 border-purple-100 shadow-sm flex-grow">
+                  <p className="text-4xl font-black text-slate-800 mb-2">{netStudent.name_en}</p>
+                  <p className="text-2xl font-bold text-slate-400 mb-8">{netStudent.class} {netStudent.name_zh}</p>
+                  
+                  <div className="bg-white p-6 rounded-2xl shadow-sm mb-6">
+                    <p className="text-sm font-bold text-purple-400">AVAILABLE COINS</p>
+                    <p className="text-6xl font-black text-purple-600">{netStudent.score}</p>
+                  </div>
+
+                  {netStudent.redeemed && (
+                    <div className="flex flex-col items-center bg-green-100 text-green-700 p-4 rounded-2xl font-bold border-2 border-green-200">
+                      <CheckCircle2 size={48} className="mb-2"/>
+                      <span className="text-2xl">ALREADY REDEEMED</span>
+                    </div>
+                  )}
+               </div>
+            )}
+          </div>
+
+          {/* Right Column: Shops (60%) */}
+          <div className="w-3/5 bg-slate-50 rounded-3xl p-6 overflow-y-auto">
+             {!netStudent && <div className="h-full flex items-center justify-center text-slate-300 font-bold text-2xl">Search for a student to begin</div>}
+             
+             {netStudent && !netStudent.redeemed && (
+                <div className="space-y-6 h-full flex flex-col">
+                  <p className="font-bold text-slate-400 text-xl">Select Exchange Shop:</p>
+                  <div className="grid grid-cols-1 gap-4 flex-grow">
+                    {SHOPS.map(shop => (
+                      <button key={shop.id} onClick={() => setSelectedShop(shop)} className={`p-6 rounded-2xl border-4 text-left transition-all shadow-sm ${selectedShop?.id === shop.id ? 'border-purple-600 bg-purple-50 scale-[1.02]' : 'border-slate-100 hover:border-purple-200 bg-white'}`}>
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="font-black text-3xl text-slate-700 mb-1">{shop.name_en}</p>
+                            <p className="text-lg text-slate-400 font-bold">{shop.name_zh}</p>
+                          </div>
+                          <div className={`px-5 py-3 rounded-xl text-white font-bold text-2xl ${shop.color}`}>x{shop.rate}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {selectedShop && (
+                    <div className="bg-slate-800 text-white p-6 rounded-3xl text-center space-y-4 shadow-xl shrink-0">
+                      <p className="text-lg font-bold text-slate-400">TOTAL EXCHANGE VALUE (HKD)</p>
+                      <p className="text-7xl font-black text-emerald-400">${netStudent.score * selectedShop.rate}</p>
+                      <button onClick={redeem} className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 rounded-2xl font-black text-2xl mt-2 shadow-lg hover:shadow-emerald-500/50 transition-all">CONFIRM REDEEM</button>
+                    </div>
+                  )}
+                </div>
+              )}
+          </div>
+
         </div>
       </div>
     </div>
@@ -649,22 +658,23 @@ const App = () => {
   );
 
   if (view === 'teacher') return (
-    <div className="min-h-screen bg-slate-100 p-4 font-sans">
-      <div className="w-full max-w-[95vw] mx-auto">
-        <div className="flex justify-between items-center mb-6 bg-white p-6 rounded-3xl shadow-sm">
-          <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察</h2>
+    <div className="h-screen w-screen bg-slate-100 p-4 font-sans overflow-hidden">
+      <div className="w-full h-full max-w-[98vw] mx-auto flex flex-col">
+        <div className="flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0">
+          <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察 (Live Monitor)</h2>
           <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        {/* FORCE 4 COLUMNS for Teacher */}
+        <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
           {['3A','3B','3C','3D'].map(cls => (
-            <div key={cls} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-[75vh]">
-              <h3 className="font-black text-2xl text-slate-700 mb-4 border-b pb-4">{cls}</h3>
+            <div key={cls} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
+              <h3 className="font-black text-2xl text-slate-700 mb-4 border-b pb-4 text-center">{cls}</h3>
               <div className="space-y-3 overflow-y-auto flex-1 pr-2">
                 {liveData.filter(d => d.class === cls).map(s => (
                   <div key={s.id} className={`p-3 rounded-xl border-2 flex justify-between items-center ${s.redeemed ? 'bg-green-50 border-green-200' : 'bg-white border-slate-100'}`}>
                     <div>
                       <span className="font-bold text-md block">{s.name}</span>
-                      <span className="text-xs text-slate-400 font-bold">{s.status === 'playing' ? '🔥 進行中...' : (s.redeemed ? '✅ 已兌換' : '⭕ 待兌換')}</span>
+                      <span className="text-xs text-slate-400 font-bold">{s.status === 'playing' ? '🔥 Playing' : (s.redeemed ? '✅ Done' : '⭕ Waiting')}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {editingId === s.id ? (
