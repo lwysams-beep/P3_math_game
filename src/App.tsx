@@ -1,10 +1,12 @@
 // @ts-nocheck
-// P.3 理財數學王 v5.6 (Reset Fix & Redemption Log)
+// P.3 理財數學王 v5.7 (Expanded Question Bank & Smart Hints)
 // Date: 2026-01-14
-// Fixes: 
-// 1. Fixed "Back to Home" in Student View to fully reset game state (no refresh needed).
-// 2. Added "Redemption Log" generation when NET redeems coins (visible on Dashboard).
-// 3. Log Format: "StudentName exchanged $XX HKD at ShopName".
+// Update:
+// 1. Massive expansion of Question Generator (Formula-based > 500 variations).
+// 2. Strictly removed all "Estimation/Rounding" questions.
+// 3. Enhanced "Teacher-level" hints for wrong answers.
+// 4. Expanded Item Database for more diverse word problems.
+// 5. Retains all v5.6 features (CSV, Logs, Reset, Offline Mode).
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -47,14 +49,19 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Smart Question Generator (v5.4 Logic with Categories) ---
+// --- 3. Expanded Smart Question Generator (v5.7) ---
 
+// Expanded Item Database
 const ITEMS_DB = [
-  { name: '蘋果', unit: '個' }, { name: '擦膠', unit: '塊' }, { name: '鉛筆', unit: '枝' },
-  { name: '原子筆', unit: '枝' }, { name: '間尺', unit: '把' }, { name: '筆記簿', unit: '本' },
-  { name: '故事書', unit: '本' }, { name: '漫畫', unit: '本' }, { name: '三文治', unit: '件' },
-  { name: '漢堡包', unit: '個' }, { name: '薯片', unit: '包' }, { name: '朱古力', unit: '排' },
-  { name: '玩具車', unit: '輛' }, { name: '公仔', unit: '個' }, { name: '顏色筆', unit: '盒' }
+  { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
+  { name: '擦膠', unit: '塊' }, { name: '鉛筆', unit: '枝' }, { name: '原子筆', unit: '枝' },
+  { name: '間尺', unit: '把' }, { name: '筆記簿', unit: '本' }, { name: '練習簿', unit: '本' },
+  { name: '故事書', unit: '本' }, { name: '漫畫', unit: '本' }, { name: '圖畫紙', unit: '包' },
+  { name: '三文治', unit: '件' }, { name: '漢堡包', unit: '個' }, { name: '熱狗', unit: '隻' },
+  { name: '薯片', unit: '包' }, { name: '朱古力', unit: '排' }, { name: '糖果', unit: '包' },
+  { name: '珍珠奶茶', unit: '杯' }, { name: '果汁', unit: '瓶' },
+  { name: '玩具車', unit: '輛' }, { name: '公仔', unit: '個' }, { name: '機械人', unit: '個' },
+  { name: '顏色筆', unit: '盒' }, { name: '貼紙', unit: '張' }, { name: '遊戲卡', unit: '包' }
 ];
 
 const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
@@ -63,96 +70,118 @@ const generateQuestion = (difficulty) => {
   let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
   const rand = Math.random();
 
-  // Categories: 'mul' (Multiplication), 'div' (Division), 'app' (Word Problems), 'logic' (Logic/Multi-step)
-
+  // --- LOW DIFFICULTY (Foundation) ---
+  // Target: P.3 basics. 2-digit Mul (simple), 2-digit Div (exact), Simple Shop.
   if (difficulty === 'low') {
     score = 5; penalty = 2;
-    if (rand < 0.33) {
-      // Type: 2-digit Mul
-      const n1 = Math.floor(Math.random() * 38) + 12; 
-      const n2 = Math.floor(Math.random() * 5) + 2;   
+    if (rand < 0.35) {
+      // Cat: 2-digit Multiplication (Simple numbers)
+      // e.g., 12x3, 22x4, 31x3. Avoids huge carries.
+      const n2 = Math.floor(Math.random() * 4) + 2; // 2-5
+      const n1 = Math.floor(Math.random() * 20) + 12; // 12-31
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
-      hint = `試用直式計算：先用 ${n2} 乘個位，再乘十位。`;
+      hint = `數學老師提示：\n試用直式計算。先算個位 ${n1%10} × ${n2}，再算十位。`;
       category = 'mul';
-    } else if (rand < 0.66) {
-      // Type: 2-digit Div
-      const ans = Math.floor(Math.random() * 11) + 10; 
-      const n2 = Math.floor(Math.random() * 4) + 2;    
-      const total = ans * n2;
-      q = `${total} ÷ ${n2} = ?`;
-      a = ans;
-      hint = `這是兩位數除法。${n2} 乘 10 是 ${n2*10}，答案一定比 10 大或等於 10。`;
+    } else if (rand < 0.7) {
+      // Cat: Division (Exact, Quotient 2-9)
+      // Reverse logic: a * b = total. 
+      const quotient = Math.floor(Math.random() * 8) + 2; // 2-9
+      const divisor = Math.floor(Math.random() * 5) + 2;  // 2-6
+      const dividend = quotient * divisor;
+      q = `${dividend} ÷ ${divisor} = ?`;
+      a = quotient;
+      hint = `數學老師提示：\n背誦乘法表：${divisor} 乘什麼數會等於 ${dividend}？`;
       category = 'div';
     } else {
-      // Type: Word Problem
+      // Cat: Word Problem (Shopping, Small numbers)
       const item = getRandomItem();
-      const count = Math.floor(Math.random() * 4) + 2; 
-      const price = Math.floor(Math.random() * 24) + 12; 
-      q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
+      const count = Math.floor(Math.random() * 3) + 2; // 2-4
+      const price = Math.floor(Math.random() * 15) + 5; // $5-$19
+      q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}共需付多少元？`;
       a = price * count;
-      hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count})。`;
+      hint = `數學老師提示：\n求總價錢，請用乘法：單價 ($${price}) × 數量 (${count})。`;
       category = 'app';
     }
   } 
+  
+  // --- MID DIFFICULTY (Standard) ---
+  // Target: P.3 Core. Harder 2-digit Mul, Div with larger nums, Sharing scenarios.
   else if (difficulty === 'mid') {
     score = 10; penalty = 5;
-    if (rand < 0.33) {
-      const n1 = Math.floor(Math.random() * 50) + 40; 
-      const n2 = Math.floor(Math.random() * 6) + 4;   
+    if (rand < 0.35) {
+      // Cat: Harder 2-digit Mul (Carry required)
+      const n1 = Math.floor(Math.random() * 60) + 35; // 35-94
+      const n2 = Math.floor(Math.random() * 6) + 3;   // 3-8
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
-      hint = "直式計算：注意進位！先算個位，積滿十要進到十位。";
+      hint = `數學老師提示：\n記得「進位」！\n例如 8×6=48，寫8進4到十位。`;
       category = 'mul';
-    } else if (rand < 0.66) {
-      const ans = Math.floor(Math.random() * 30) + 20; 
-      const n2 = Math.floor(Math.random() * 5) + 3;    
-      const total = ans * n2;
-      q = `${total} ÷ ${n2} = ?`;
-      a = ans;
-      hint = `試用直式除法：先看十位夠不夠除，不夠就看兩位。`;
+    } else if (rand < 0.7) {
+      // Cat: Harder Division (2-digit dividend, 1-digit divisor, Quotient > 10)
+      const quotient = Math.floor(Math.random() * 20) + 11; // 11-30
+      const divisor = Math.floor(Math.random() * 5) + 3;    // 3-7
+      const dividend = quotient * divisor;
+      q = `${dividend} ÷ ${divisor} = ?`;
+      a = quotient;
+      hint = `數學老師提示：\n用直式除法。\n先看十位：${Math.floor(dividend/10)} 除以 ${divisor} 商多少？`;
       category = 'div';
     } else {
+      // Cat: Word Problem (Sharing / Average)
       const item = getRandomItem();
-      const count = Math.floor(Math.random() * 6) + 4; 
-      const price = Math.floor(Math.random() * 30) + 25; 
-      q = `老師買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
-      a = price * count;
-      hint = `較大的數字乘法。$${price} × ${count}，建議用直式計算。`;
+      const total = Math.floor(Math.random() * 50) + 30; // 30-79
+      const perPerson = Math.floor(Math.random() * 6) + 3; // 3-8 (Divisor)
+      // Make it exact division for question generation
+      const grandTotal = total - (total % perPerson); 
+      q = `老師有 ${grandTotal} ${item.unit}${item.name}，平均分給 ${perPerson} 位同學，每人可得多少${item.unit}？`;
+      a = grandTotal / perPerson;
+      hint = `數學老師提示：\n關鍵字是「平均分」，這代表要用除法 (${grandTotal} ÷ ${perPerson})。`;
       category = 'app';
     }
   } 
+  
+  // --- HIGH DIFFICULTY (Advanced) ---
+  // Target: P.3 Advanced. 3-digit Mul, Logic (Change), Mixed Steps.
   else { 
     score = 20; penalty = 10;
     if (rand < 0.3) {
-      const n1 = Math.floor(Math.random() * 400) + 100; 
-      const n2 = Math.floor(Math.random() * 7) + 3;     
+      // Cat: 3-digit x 1-digit
+      const n1 = Math.floor(Math.random() * 300) + 120; // 120-419
+      const n2 = Math.floor(Math.random() * 6) + 3;     // 3-8
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
-      hint = "直式乘法：由右至左計算 (個位→十位→百位)，別忘了把進位的數加上去！";
+      hint = `數學老師提示：\n三位數乘法：\n1. 個位 × ${n2}\n2. 十位 × ${n2} (加進位)\n3. 百位 × ${n2} (加進位)`;
       category = 'mul';
     } else if (rand < 0.6) {
-      const totalMoney = Math.floor(Math.random() * 80) * 5 + 100; 
-      const people = 5;
-      q = `將 $${totalMoney} 平均分給 ${people} 人，每人可得多少元？`;
-      a = totalMoney / people;
-      hint = "平均分就是除法。請計算 " + totalMoney + " ÷ " + people + "。";
-      category = 'div';
+      // Cat: Logic / Mixed (Buying Multiple Items)
+      const item1 = ITEMS_DB[Math.floor(Math.random() * 5)];
+      const item2 = ITEMS_DB[Math.floor(Math.random() * 5) + 5];
+      const p1 = Math.floor(Math.random() * 10) + 5;
+      const p2 = Math.floor(Math.random() * 10) + 10;
+      const qty = 2;
+      q = `買 ${qty} ${item1.unit}${item1.name} (每${item1.unit}$${p1}) 和 1 ${item2.unit}${item2.name} ($${p2})，共需付多少元？`;
+      a = (p1 * qty) + p2;
+      hint = `數學老師提示：\n這是混合題。\n先算：${qty}個${item1.name}的價錢 ($${p1} × ${qty})\n再加：${item2.name}的價錢 (+$${p2})`;
+      category = 'logic';
     } else {
-      const wallet = Math.floor(Math.random() * 5) * 10 + 300; 
+      // Cat: Logic (Change / Remaining)
+      const wallet = (Math.floor(Math.random() * 5) + 1) * 100; // 100, 200, 300...
       const item = getRandomItem();
-      const count = Math.floor(Math.random() * 4) + 2;
-      const price = Math.floor(Math.random() * 40) + 30; 
+      const count = Math.floor(Math.random() * 5) + 3;
+      const price = Math.floor(Math.random() * 15) + 10;
+      const cost = price * count;
       
-      if (price * count > wallet) { 
-         q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}共需多少元？`;
-         a = price * count;
-         hint = `計算 ${price} × ${count} 即可。`;
-         category = 'app';
+      // Ensure logic is valid (Cost < Wallet)
+      if (cost >= wallet) {
+         // Fallback to simple multiplication
+         q = `${item.unit}${item.name}每${item.unit} $${price}，買 ${count} ${item.unit}要多少元？`;
+         a = cost;
+         hint = `數學老師提示：\n直接將 單價 × 數量 即可。`;
+         category = 'mul';
       } else {
-         q = `小明有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。他還剩下多少元？`;
-         a = wallet - (price * count);
-         hint = `這題有兩步：\n1. 先算買東西共用了多少錢 (${price} × ${count})\n2. 再用原本有的錢減去用去的錢。`;
+         q = `小明有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。找回多少元？`;
+         a = wallet - cost;
+         hint = `數學老師提示：\n找贖問題有兩步：\n1. 先算共用了多少錢？ (${price} × ${count})\n2. 再用原本的錢減去用去的錢 ($${wallet} - ?)。`;
          category = 'logic';
       }
     }
@@ -639,7 +668,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.6</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.7</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -732,7 +761,7 @@ const App = () => {
                   </div>
                   {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
                   
-                  {/* Question */}
+                  {/* Question (Smaller font as requested - changed from 6xl/8xl to 4xl/6xl) */}
                   <p className="text-4xl lg:text-6xl font-bold text-slate-800 text-center leading-tight px-4">{currentQuestion.q}</p>
                 </div>
 
@@ -838,7 +867,12 @@ const App = () => {
               <p className="text-slate-400 font-bold">Exchange Rate: ${selectedShop.rate} HKD / Coin</p>
             </div>
           </div>
-          <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
+          <div className="flex gap-4">
+             <button onClick={handleResetAll} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
+              <RotateCcw size={20}/> 重設所有分數
+            </button>
+            <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
+          </div>
         </div>
         <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
           {['3A','3B','3C','3D'].map(cls => (
