@@ -1,9 +1,12 @@
 // @ts-nocheck
-// P.3 理財數學王 v5.8 (Persistent Hints)
+// P.3 理財數學王 v6.0 (Smart Flow & Diverse Questions)
 // Date: 2026-01-14
 // Fixes: 
-// 1. Hints no longer disappear automatically on wrong answers.
-// 2. Hints persist until the student answers correctly or runs out of attempts.
+// 1. Division logic improved (avoids repetitive 11, 22 etc.).
+// 2. Visual "Shake" feedback on wrong answers.
+// 3. Question Pattern: 2 Calculation -> 1 Word Problem cycle.
+// 4. Duplicate prevention (prevents same numbers back-to-back).
+// 5. "Time's Up" view modified: Direct link to Difficulty Select (retaining student).
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -46,9 +49,8 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Expanded Smart Question Generator (v5.7) ---
+// --- 3. Smart Question Generator (v6.0 Logic) ---
 
-// Expanded Item Database
 const ITEMS_DB = [
   { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
   { name: '擦膠', unit: '塊' }, { name: '鉛筆', unit: '枝' }, { name: '原子筆', unit: '枝' },
@@ -63,120 +65,185 @@ const ITEMS_DB = [
 
 const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
 
-const generateQuestion = (difficulty) => {
-  let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
-  const rand = Math.random();
+// Generate a random integer between min and max (inclusive)
+const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-  // --- LOW DIFFICULTY (Foundation) ---
-  if (difficulty === 'low') {
-    score = 5; penalty = 2;
-    if (rand < 0.35) {
-      // Cat: 2-digit Multiplication (Simple numbers)
-      const n2 = Math.floor(Math.random() * 4) + 2; // 2-5
-      const n1 = Math.floor(Math.random() * 20) + 12; // 12-31
-      q = `${n1} × ${n2} = ?`;
-      a = n1 * n2;
-      hint = `數學老師提示：\n試用直式計算。先算個位 ${n1%10} × ${n2}，再算十位。`;
-      category = 'mul';
-    } else if (rand < 0.7) {
-      // Cat: Division (Exact, Quotient 2-9)
-      const quotient = Math.floor(Math.random() * 8) + 2; // 2-9
-      const divisor = Math.floor(Math.random() * 5) + 2;  // 2-6
-      const dividend = quotient * divisor;
-      q = `${dividend} ÷ ${divisor} = ?`;
-      a = quotient;
-      hint = `數學老師提示：\n背誦乘法表：${divisor} 乘什麼數會等於 ${dividend}？`;
-      category = 'div';
-    } else {
-      // Cat: Word Problem (Shopping, Small numbers)
-      const item = getRandomItem();
-      const count = Math.floor(Math.random() * 3) + 2; // 2-4
-      const price = Math.floor(Math.random() * 15) + 5; // $5-$19
-      q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}共需付多少元？`;
-      a = price * count;
-      hint = `數學老師提示：\n求總價錢，請用乘法：單價 ($${price}) × 數量 (${count})。`;
-      category = 'app';
-    }
-  } 
+const generateQuestion = (difficulty, questionIndex, lastQSignature) => {
+  let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
+  let signature = "";
+  let attempts = 0;
+
+  // Pattern: 2 Calc, 1 App (Index starts at 1)
+  // Index 1: Calc, 2: Calc, 3: App, 4: Calc...
+  const isAppTurn = (questionIndex % 3 === 0); 
   
-  // --- MID DIFFICULTY (Standard) ---
-  else if (difficulty === 'mid') {
-    score = 10; penalty = 5;
-    if (rand < 0.35) {
-      // Cat: Harder 2-digit Mul (Carry required)
-      const n1 = Math.floor(Math.random() * 60) + 35; // 35-94
-      const n2 = Math.floor(Math.random() * 6) + 3;   // 3-8
-      q = `${n1} × ${n2} = ?`;
-      a = n1 * n2;
-      hint = `數學老師提示：\n記得「進位」！\n例如 8×6=48，寫8進4到十位。`;
-      category = 'mul';
-    } else if (rand < 0.7) {
-      // Cat: Harder Division (2-digit dividend, 1-digit divisor, Quotient > 10)
-      const quotient = Math.floor(Math.random() * 20) + 11; // 11-30
-      const divisor = Math.floor(Math.random() * 5) + 3;    // 3-7
-      const dividend = quotient * divisor;
-      q = `${dividend} ÷ ${divisor} = ?`;
-      a = quotient;
-      hint = `數學老師提示：\n用直式除法。\n先看十位：${Math.floor(dividend/10)} 除以 ${divisor} 商多少？`;
-      category = 'div';
-    } else {
-      // Cat: Word Problem (Sharing / Average)
-      const item = getRandomItem();
-      const total = Math.floor(Math.random() * 50) + 30; // 30-79
-      const perPerson = Math.floor(Math.random() * 6) + 3; // 3-8 (Divisor)
-      const grandTotal = total - (total % perPerson); 
-      q = `老師有 ${grandTotal} ${item.unit}${item.name}，平均分給 ${perPerson} 位同學，每人可得多少${item.unit}？`;
-      a = grandTotal / perPerson;
-      hint = `數學老師提示：\n關鍵字是「平均分」，這代表要用除法 (${grandTotal} ÷ ${perPerson})。`;
-      category = 'app';
-    }
-  } 
-  
-  // --- HIGH DIFFICULTY (Advanced) ---
-  else { 
-    score = 20; penalty = 10;
-    if (rand < 0.3) {
-      // Cat: 3-digit x 1-digit
-      const n1 = Math.floor(Math.random() * 300) + 120; // 120-419
-      const n2 = Math.floor(Math.random() * 6) + 3;     // 3-8
-      q = `${n1} × ${n2} = ?`;
-      a = n1 * n2;
-      hint = `數學老師提示：\n三位數乘法：\n1. 個位 × ${n2}\n2. 十位 × ${n2} (加進位)\n3. 百位 × ${n2} (加進位)`;
-      category = 'mul';
-    } else if (rand < 0.6) {
-      // Cat: Logic / Mixed (Buying Multiple Items)
-      const item1 = ITEMS_DB[Math.floor(Math.random() * 5)];
-      const item2 = ITEMS_DB[Math.floor(Math.random() * 5) + 5];
-      const p1 = Math.floor(Math.random() * 10) + 5;
-      const p2 = Math.floor(Math.random() * 10) + 10;
-      const qty = 2;
-      q = `買 ${qty} ${item1.unit}${item1.name} (每${item1.unit}$${p1}) 和 1 ${item2.unit}${item2.name} ($${p2})，共需付多少元？`;
-      a = (p1 * qty) + p2;
-      hint = `數學老師提示：\n這是混合題。\n先算：${qty}個${item1.name}的價錢 ($${p1} × ${qty})\n再加：${item2.name}的價錢 (+$${p2})`;
-      category = 'logic';
-    } else {
-      // Cat: Logic (Change / Remaining)
-      const wallet = (Math.floor(Math.random() * 5) + 1) * 100; // 100, 200, 300...
-      const item = getRandomItem();
-      const count = Math.floor(Math.random() * 5) + 3;
-      const price = Math.floor(Math.random() * 15) + 10;
-      const cost = price * count;
+  // Retry loop to prevent duplicates
+  do {
+    attempts++;
+    const rand = Math.random();
+
+    // --- LOW DIFFICULTY ---
+    if (difficulty === 'low') {
+      score = 5; penalty = 2;
       
-      if (cost >= wallet) {
-         q = `${item.unit}${item.name}每${item.unit} $${price}，買 ${count} ${item.unit}要多少元？`;
-         a = cost;
-         hint = `數學老師提示：\n直接將 單價 × 數量 即可。`;
-         category = 'mul';
-      } else {
-         q = `小明有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。找回多少元？`;
-         a = wallet - cost;
-         hint = `數學老師提示：\n找贖問題有兩步：\n1. 先算共用了多少錢？ (${price} × ${count})\n2. 再用原本的錢減去用去的錢 ($${wallet} - ?)。`;
-         category = 'logic';
+      if (!isAppTurn) { // Calculation
+        if (rand < 0.5) {
+          // 2-digit Mul (Strict > 10)
+          const n1 = randomInt(12, 49); 
+          const n2 = randomInt(2, 6);   
+          q = `${n1} × ${n2} = ?`;
+          a = n1 * n2;
+          hint = `數學老師提示：\n試用直式計算。先算個位 ${n1%10} × ${n2}，再算十位。`;
+          category = 'mul';
+          signature = `mul-${n1}-${n2}`;
+        } else {
+          // Division (Quotient 12-19, exclude 10,11)
+          const ans = randomInt(12, 19); 
+          const n2 = randomInt(2, 5);    
+          const total = ans * n2;
+          q = `${total} ÷ ${n2} = ?`;
+          a = ans;
+          hint = `數學老師提示：\n${n2} 乘 10 是 ${n2*10}，答案比 10 大一點。`;
+          category = 'div';
+          signature = `div-${total}-${n2}`;
+        }
+      } else { // Word Problem
+        const item = getRandomItem();
+        const count = randomInt(2, 5); 
+        const price = randomInt(12, 25); 
+        
+        // Template Diversity
+        const tpl = randomInt(1, 2);
+        if (tpl === 1) {
+             q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
+        } else {
+             q = `小明想買 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共要付多少錢？`;
+        }
+        
+        a = price * count;
+        hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count})。`;
+        category = 'app';
+        signature = `app-${price}-${count}`;
+      }
+    } 
+    
+    // --- MID DIFFICULTY ---
+    else if (difficulty === 'mid') {
+      score = 10; penalty = 5;
+      
+      if (!isAppTurn) { // Calculation
+        if (rand < 0.5) {
+          // Harder 2-digit Mul
+          const n1 = randomInt(35, 95); 
+          const n2 = randomInt(3, 8);   
+          q = `${n1} × ${n2} = ?`;
+          a = n1 * n2;
+          hint = "直式計算：注意進位！先算個位，積滿十要進到十位。";
+          category = 'mul';
+          signature = `mul-${n1}-${n2}`;
+        } else {
+          // Harder Division (Avoid 10,11,20,22 etc simple ones)
+          let ans;
+          do { ans = randomInt(13, 35); } while (ans % 10 === 0 || ans % 11 === 0);
+          const n2 = randomInt(3, 7);    
+          const total = ans * n2;
+          q = `${total} ÷ ${n2} = ?`;
+          a = ans;
+          hint = `試用直式除法：先看十位夠不夠除。`;
+          category = 'div';
+          signature = `div-${total}-${n2}`;
+        }
+      } else { // Word Problem
+        const item = getRandomItem();
+        const tpl = randomInt(1, 3);
+        
+        if (tpl === 1) { // Shopping
+            const count = randomInt(4, 9);
+            const price = randomInt(15, 45);
+            q = `老師買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
+            a = price * count;
+            hint = `總金額 = 單價 × 數量。`;
+            signature = `app-${price}-${count}`;
+        } else if (tpl === 2) { // Sharing (Division)
+            const total = randomInt(40, 90);
+            const perPerson = randomInt(3, 8);
+            const grandTotal = total - (total % perPerson); // Make exact
+            q = `有 ${grandTotal} ${item.unit}${item.name}，平均分給 ${perPerson} 位同學，每人可得多少${item.unit}？`;
+            a = grandTotal / perPerson;
+            hint = `關鍵字是「平均分」，這代表要用除法。`;
+            signature = `app-${grandTotal}-${perPerson}`;
+        } else { // Savings (Multiplication)
+            const days = randomInt(5, 9);
+            const saving = randomInt(12, 25);
+            q = `小美每天儲蓄 $${saving}，${days} 天後她共儲蓄了多少元？`;
+            a = saving * days;
+            hint = `每天存一樣的錢，存了多天，用乘法計算總額。`;
+            signature = `app-${saving}-${days}`;
+        }
+        category = 'app';
+      }
+    } 
+    
+    // --- HIGH DIFFICULTY ---
+    else { 
+      score = 20; penalty = 10;
+      
+      if (!isAppTurn) { // Calculation
+        if (rand < 0.5) {
+          // 3-digit x 1-digit
+          const n1 = randomInt(125, 450); 
+          const n2 = randomInt(3, 8);     
+          q = `${n1} × ${n2} = ?`;
+          a = n1 * n2;
+          hint = "三位數乘法：由個位開始乘，記得加進位！";
+          category = 'mul';
+          signature = `mul-${n1}-${n2}`;
+        } else {
+          // Division (Sharing money context)
+          const totalMoney = randomInt(12, 50) * 5 + 100; 
+          const people = 5;
+          q = `將 $${totalMoney} 平均分給 ${people} 人，每人可得多少元？`;
+          a = totalMoney / people;
+          hint = "平均分就是除法。";
+          category = 'div';
+          signature = `div-${totalMoney}-${people}`;
+        }
+      } else { // Word Problem (Logic/Mixed)
+        const tpl = randomInt(1, 2);
+        const item = getRandomItem();
+        
+        if (tpl === 1) { // Change (Subtraction after Mul)
+            const wallet = randomInt(2, 5) * 100; // 200, 300...
+            const count = randomInt(3, 6);
+            const price = randomInt(25, 55);
+            const cost = price * count;
+            if (cost >= wallet) { // Fallback if expensive
+                 q = `每${item.unit}${item.name} $${price}，買 ${count} ${item.unit}共需多少元？`;
+                 a = cost;
+                 signature = `app-${price}-${count}`;
+            } else {
+                 q = `小明有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。找回多少元？`;
+                 a = wallet - cost;
+                 hint = `先算共用了多少錢 ($${price} × ${count})，再用 $${wallet} 減去它。`;
+                 category = 'logic';
+                 signature = `logic-${wallet}-${price}-${count}`;
+            }
+        } else { // Mixed items (Add after Mul)
+            const item2 = ITEMS_DB[(ITEMS_DB.indexOf(item) + 5) % ITEMS_DB.length];
+            const p1 = randomInt(15, 30);
+            const p2 = randomInt(10, 20);
+            const qty = randomInt(2, 4);
+            q = `買 ${qty} ${item.unit}${item.name} (每${item.unit}$${p1}) 和 1 ${item2.unit}${item2.name} ($${p2})，共需付多少元？`;
+            a = (p1 * qty) + p2;
+            hint = `先算${item.name}的總價，再加上${item2.name}的價錢。`;
+            category = 'logic';
+            signature = `logic-${p1}-${qty}-${p2}`;
+        }
       }
     }
-  }
-  
-  return { q, a, score, penalty, difficulty, hint, category };
+  } while (signature === lastQSignature && attempts < 5); // Retry if same signature
+
+  return { q, a, score, penalty, difficulty, hint, category, signature };
 };
 
 // CSV Data 
@@ -291,11 +358,14 @@ const App = () => {
   const [currentStudent, setCurrentStudent] = useState(null);
   const [difficulty, setDifficulty] = useState('low');
   const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [questionCount, setQuestionCount] = useState(0); // Track question count for 2:1 ratio
+  const [lastQSignature, setLastQSignature] = useState(''); // Prevent duplicates
    
   // Game State
   const [timeLeft, setTimeLeft] = useState(GAME_DURATION);
   const [answer, setAnswer] = useState('');
   const [feedback, setFeedback] = useState(null);
+  const [shake, setShake] = useState(false); // Visual feedback
   const [gameActive, setGameActive] = useState(false);
   const [strikes, setStrikes] = useState(0); 
   const [sessionScore, setSessionScore] = useState(0); 
@@ -327,6 +397,20 @@ const App = () => {
     allStudents.forEach(s => { if(map[s.class]) map[s.class].push(s); });
     return map;
   }, [allStudents]);
+
+  // Styles for Shake Animation
+  const shakeStyle = `
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+      20%, 40%, 60%, 80% { transform: translateX(10px); }
+    }
+    .animate-shake {
+      animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+      border-color: #ef4444 !important; /* Red border */
+      background-color: #fef2f2 !important; /* Red bg */
+    }
+  `;
 
   // Auth Init
   useEffect(() => {
@@ -377,7 +461,7 @@ const App = () => {
 
   // --- Logic ---
   
-  // RESET LOGIC FOR BACK TO HOME
+  // RESET LOGIC FOR BACK TO HOME (Full Reset)
   const handleBackToHome = () => {
     setStudentView('class_select');
     setCurrentStudent(null);
@@ -389,6 +473,17 @@ const App = () => {
     setCurrentQuestion(null);
     setIsStarting(false);
     setView('home');
+  };
+
+  // PLAY AGAIN LOGIC (Keep Student, Reset Session)
+  const handlePlayAgain = () => {
+    setSessionScore(0);
+    setSessionCorrect(0);
+    setSessionWrong(0);
+    setStrikes(0);
+    setCurrentQuestion(null);
+    setIsStarting(false);
+    setStudentView('difficulty'); // Go to difficulty select directly
   };
 
   const startGame = async () => {
@@ -417,9 +512,11 @@ const App = () => {
     setSessionWrong(0);
     setStrikes(0);
     setTimeLeft(GAME_DURATION);
+    setQuestionCount(0); // Reset question count for 2:1 ratio
     
-    const q = generateQuestion(difficulty);
+    const q = generateQuestion(difficulty, 1, ''); // First question
     setCurrentQuestion(q);
+    setLastQSignature(q.signature);
     
     if (!isOffline && user) {
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id);
@@ -483,12 +580,24 @@ const App = () => {
         setFeedback(null);
         setAnswer('');
         setStrikes(0);
-        setCurrentQuestion(generateQuestion(difficulty));
+        
+        // Generate Next Question (2:1 Logic)
+        const nextCount = questionCount + 1;
+        setQuestionCount(nextCount);
+        const q = generateQuestion(difficulty, nextCount + 1, lastQSignature); // +1 because we are preparing next
+        setCurrentQuestion(q);
+        setLastQSignature(q.signature);
+
       }, 800);
 
     } else {
+      // Wrong Answer Logic
       const newStrikes = strikes + 1;
       setStrikes(newStrikes);
+      
+      // Trigger Shake Animation
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
 
       if (newStrikes < 3) {
         setFeedback({ 
@@ -496,9 +605,7 @@ const App = () => {
           msg: `答錯了！${currentQuestion.hint} (還有 ${3 - newStrikes} 次機會)` 
         });
         setAnswer(''); 
-        // Longer timeout for user to read hint
-        // REMOVED THE TIMEOUT TO MAKE HINT PERSISTENT
-        // setTimeout(() => setFeedback(null), 4000); 
+        // Hint stays
       } else {
         const penalty = currentQuestion.penalty;
         setSessionScore(s => s - penalty); 
@@ -519,8 +626,15 @@ const App = () => {
           setFeedback(null);
           setAnswer('');
           setStrikes(0);
-          setCurrentQuestion(generateQuestion(difficulty));
-        }, 1500);
+          
+          // Generate Next Question (2:1 Logic)
+          const nextCount = questionCount + 1;
+          setQuestionCount(nextCount);
+          const q = generateQuestion(difficulty, nextCount + 1, lastQSignature);
+          setCurrentQuestion(q);
+          setLastQSignature(q.signature);
+
+        }, 2000); // Longer pause for wrong answer to see correct one
       }
     }
   };
@@ -566,6 +680,31 @@ const App = () => {
     }
   };
 
+  const handleResetRedemptionsOnly = async () => {
+    const pwd = prompt("請輸入重設密碼 (Enter Password to Reset All Redemptions):");
+    if (pwd !== RESET_PWD) {
+      alert("密碼錯誤 (Wrong Password)");
+      return;
+    }
+    if(!confirm("⚠️ 注意 Warning ⚠️\n這將重置所有學生的「兌換狀態」為未兌換，分數保留不變！\n確定要執行嗎？")) return;
+
+    try {
+      const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((docSnap) => {
+        batch.update(docSnap.ref, { 
+          redeemed: false, 
+          lastLog: '' 
+        });
+      });
+      await batch.commit();
+      alert("所有兌換狀態已重置 (All redemptions reset).");
+    } catch (e) {
+      alert("重置失敗 (Reset Failed): " + e.message);
+    }
+  };
+
   const handleResetAll = async () => {
     const pwd = prompt("請輸入重設密碼 (Enter Password to Reset All Scores):");
     if (pwd !== RESET_PWD) {
@@ -585,7 +724,7 @@ const App = () => {
           status: 'ready',
           correctCount: 0,
           wrongCount: 0,
-          lastLog: '', // Reset log
+          lastLog: '', 
           'errors.mul': 0,
           'errors.div': 0,
           'errors.app': 0,
@@ -656,10 +795,11 @@ const App = () => {
 
   if (view === 'home') return (
     <div className="h-screen w-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4 overflow-hidden relative">
+      <style>{shakeStyle}</style>
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.8</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.0</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -679,6 +819,7 @@ const App = () => {
 
   if (view === 'student') return (
     <div className="h-screen w-screen bg-orange-50 p-4 overflow-hidden relative">
+      <style>{shakeStyle}</style>
       <ConnectionStatus/>
       <div className="w-full h-full max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 flex flex-col">
         <div className="bg-orange-500 p-4 text-white flex justify-between items-center shrink-0">
@@ -709,6 +850,9 @@ const App = () => {
           {studentView === 'difficulty' && (
             <div className="flex-grow flex flex-col justify-center items-center space-y-6">
               <h3 className="text-3xl font-black">選擇挑戰難度</h3>
+              {/* Added Student Info */}
+              {currentStudent && <p className="text-xl text-slate-500 font-bold">Student: {currentStudent.class} {currentStudent.name_zh}</p>}
+              
               <div className="grid grid-cols-3 gap-8 w-full max-w-6xl">
                 <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="p-12 bg-green-100 border-4 border-green-300 rounded-3xl text-3xl font-black text-green-800 hover:scale-105 transition-transform shadow-lg">
                   初級 (Low)<br/><span className="text-lg font-bold mt-2 block">每題 5 分<br/>(扣 2 分)</span>
@@ -770,7 +914,7 @@ const App = () => {
                     </div>
                   </div>
 
-                  {/* NEW: Student Stats Display */}
+                  {/* Student Stats Display */}
                   <div className="grid grid-cols-2 gap-2">
                     <div className="bg-green-50 p-2 rounded-xl flex items-center justify-center gap-2 text-green-700 border border-green-200">
                       <CheckCircle2 size={20}/>
@@ -787,7 +931,14 @@ const App = () => {
                   </div>
 
                   <form onSubmit={submitAnswer} className="flex flex-col gap-4">
-                    <input type="number" autoFocus value={answer} onChange={e => setAnswer(e.target.value)} className="w-full p-6 rounded-2xl border-4 border-slate-300 text-5xl text-center font-black outline-none focus:border-orange-500 transition-colors shadow-sm" placeholder="?"/>
+                    <input 
+                      type="number" 
+                      autoFocus 
+                      value={answer} 
+                      onChange={e => setAnswer(e.target.value)} 
+                      className={`w-full p-6 rounded-2xl border-4 text-5xl text-center font-black outline-none transition-all shadow-sm ${shake ? 'animate-shake border-red-400 bg-red-50' : 'border-slate-300 focus:border-orange-500'}`} 
+                      placeholder="?"
+                    />
                     <button type="submit" className="w-full py-8 bg-slate-800 text-white rounded-2xl font-black text-4xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
                   </form>
                 </div>
@@ -809,8 +960,10 @@ const App = () => {
                   <p className="text-5xl font-black text-orange-600">{totalAccumulatedScore}</p>
                 </div>
               </div>
-              <p className="font-bold text-slate-400 text-xl">Go to Exchange Shop!</p>
-              <button onClick={handleBackToHome} className="text-slate-400 font-bold underline text-lg">Back Home</button>
+              <button onClick={handlePlayAgain} className="px-16 py-6 bg-slate-800 text-white rounded-2xl font-black text-2xl hover:bg-black transition-colors shadow-lg flex items-center gap-3">
+                <RotateCcw size={28}/> 再次挑戰 (Play Again)
+              </button>
+              <button onClick={handleBackToHome} className="text-slate-400 font-bold underline text-lg">完全登出 (Logout)</button>
             </div>
           )}
         </div>
@@ -859,8 +1012,8 @@ const App = () => {
             </div>
           </div>
           <div className="flex gap-4">
-             <button onClick={handleResetAll} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
-              <RotateCcw size={20}/> 重設所有分數
+             <button onClick={handleResetRedemptionsOnly} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
+              <RotateCcw size={20}/> 重設所有兌換
             </button>
             <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
           </div>
