@@ -1,11 +1,11 @@
 // @ts-nocheck
-// P.3 理財數學王 v5.1 (Smart Math Engine & Teacher Hints)
+// P.3 理財數學王 v5.3 (Strict Low Difficulty)
 // Date: 2026-01-14
 // Fixes: 
-// 1. Removed all approximation/rounding questions.
-// 2. Implemented Formula-based Question Generator (Infinite variations).
-// 3. Added Contextual Hints (Teacher Level) for wrong answers.
-// 4. Enhanced Word Problem variety (Items, Units, Prices).
+// 1. "Low" Difficulty STRICTLY enforced to 2-digit x 1-digit (Min n1=12).
+// 2. No single digit multiplication (e.g. 5x3 is gone).
+// 3. Division logic updated to ensure 2-digit dividends and preferably 2-digit quotients (10-20).
+// 4. Word problems minimum price set to $12 to prevent simple calculations.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -48,95 +48,94 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Smart Question Generator (v5.1 Logic) ---
+// --- 3. Smart Question Generator (v5.3 Logic) ---
 
 // Item Database for Word Problems
 const ITEMS_DB = [
-  { name: '蘋果', unit: '個', minP: 3, maxP: 10 },
-  { name: '擦膠', unit: '塊', minP: 2, maxP: 8 },
-  { name: '鉛筆', unit: '枝', minP: 4, maxP: 15 },
-  { name: '原子筆', unit: '枝', minP: 8, maxP: 25 },
-  { name: '間尺', unit: '把', minP: 5, maxP: 12 },
-  { name: '筆記簿', unit: '本', minP: 10, maxP: 30 },
-  { name: '故事書', unit: '本', minP: 40, maxP: 120 },
-  { name: '漫畫', unit: '本', minP: 35, maxP: 85 },
-  { name: '三文治', unit: '件', minP: 15, maxP: 28 },
-  { name: '漢堡包', unit: '個', minP: 20, maxP: 45 },
-  { name: '薯片', unit: '包', minP: 8, maxP: 18 },
-  { name: '朱古力', unit: '排', minP: 12, maxP: 35 },
-  { name: '玩具車', unit: '輛', minP: 25, maxP: 80 },
-  { name: '公仔', unit: '個', minP: 50, maxP: 150 },
-  { name: '顏色筆', unit: '盒', minP: 20, maxP: 60 }
+  { name: '蘋果', unit: '個' },
+  { name: '擦膠', unit: '塊' },
+  { name: '鉛筆', unit: '枝' },
+  { name: '原子筆', unit: '枝' },
+  { name: '間尺', unit: '把' },
+  { name: '筆記簿', unit: '本' },
+  { name: '故事書', unit: '本' },
+  { name: '漫畫', unit: '本' },
+  { name: '三文治', unit: '件' },
+  { name: '漢堡包', unit: '個' },
+  { name: '薯片', unit: '包' },
+  { name: '朱古力', unit: '排' },
+  { name: '玩具車', unit: '輛' },
+  { name: '公仔', unit: '個' },
+  { name: '顏色筆', unit: '盒' }
 ];
 
 const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
 
 const generateQuestion = (difficulty) => {
   let q = "", a = 0, score = 0, penalty = 0, hint = "";
-  
-  // Define templates based on difficulty
-  // Low: Basic Mul table, Simple Money Add/Sub
-  // Mid: 2-digit Mul, Simple Div, Basic Word Problems
-  // High: 3-digit Mul, Div with Remainder logic (but exact input), Multi-step Word Problems
-
   const rand = Math.random();
 
+  // --- LOW DIFFICULTY (Strict 2-digit x 1-digit, NO simple tables) ---
   if (difficulty === 'low') {
     score = 5; penalty = 2;
-    if (rand < 0.4) {
-      // Type: Basic Multiplication (Table)
-      const n1 = Math.floor(Math.random() * 8) + 2; // 2-9
-      const n2 = Math.floor(Math.random() * 9) + 1; // 1-9
+    if (rand < 0.33) {
+      // Type: 2-digit Multiplication (Strict > 10)
+      // n1: 12 to 49 (Ensures 2 digits, not too hard but not 5x3)
+      const n1 = Math.floor(Math.random() * 38) + 12; 
+      const n2 = Math.floor(Math.random() * 5) + 2;   // 2 - 6
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
-      hint = "背誦九九乘法表，想想 " + n1 + " 乘 " + n2 + " 是多少？";
-    } else if (rand < 0.7) {
-      // Type: Simple Addition (Money)
-      const p1 = Math.floor(Math.random() * 40) + 10;
-      const p2 = Math.floor(Math.random() * 40) + 10;
-      q = `$${p1} + $${p2} = ?`;
-      a = p1 + p2;
-      hint = "將兩個數值加起來，先加個位，再加十位。";
-    } else {
-      // Type: Simple Word Problem (Concept of multiplication)
-      const item = getRandomItem();
-      const count = Math.floor(Math.random() * 4) + 2; // 2-5
-      const price = Math.floor(Math.random() * 8) + 2; // 2-9
-      q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
-      a = price * count;
-      hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count}) 就是總價。`;
-    }
-  } 
-  
-  else if (difficulty === 'mid') {
-    score = 10; penalty = 5;
-    if (rand < 0.4) {
-      // Type: 2-digit x 1-digit
-      const n1 = Math.floor(Math.random() * 80) + 10; // 10-89
-      const n2 = Math.floor(Math.random() * 8) + 2;   // 2-9
-      q = `${n1} × ${n2} = ?`;
-      a = n1 * n2;
-      hint = "試用直式計算：先用" + n2 + "乘個位，有進位要加到十位，再乘十位。";
-    } else if (rand < 0.7) {
-      // Type: Division (Exact)
-      const ans = Math.floor(Math.random() * 15) + 4;
-      const n2 = Math.floor(Math.random() * 7) + 3; // 3-9
+      hint = `試用直式計算：先用 ${n2} 乘個位，再乘十位。`;
+    } else if (rand < 0.66) {
+      // Type: 2-digit Division (Quotient 10-20 to ensure 2-digit dividend)
+      const ans = Math.floor(Math.random() * 11) + 10; // Answer: 10 - 20
+      const n2 = Math.floor(Math.random() * 4) + 2;    // Divisor: 2 - 5
       const total = ans * n2;
       q = `${total} ÷ ${n2} = ?`;
       a = ans;
-      hint = "這是一道除法題。你可以想：" + n2 + " 乘多少會等於 " + total + "？";
+      hint = `這是兩位數除法。${n2} 乘 10 是 ${n2*10}，答案一定比 10 大或等於 10。`;
     } else {
-      // Type: Word Problem (Shopping)
+      // Type: Word Problem (Price > $12)
       const item = getRandomItem();
-      const count = Math.floor(Math.random() * 6) + 3;
-      const price = Math.floor(Math.random() * 20) + 10; // 10-29
-      q = `媽媽買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
+      const count = Math.floor(Math.random() * 4) + 2; // Count: 2 - 5
+      const price = Math.floor(Math.random() * 24) + 12; // Price: $12 - $35
+      q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
       a = price * count;
-      hint = `總金額 = 每${item.unit}價錢 × 購買數量。試試計算 ${price} × ${count}。`;
+      hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count})。`;
     }
   } 
   
-  else { // High
+  // --- MID DIFFICULTY (Harder 2-digit, Carry logic) ---
+  else if (difficulty === 'mid') {
+    score = 10; penalty = 5;
+    if (rand < 0.33) {
+      // Type: Harder 2-digit Multiplication
+      const n1 = Math.floor(Math.random() * 50) + 40; // Range: 40 - 89
+      const n2 = Math.floor(Math.random() * 6) + 4;   // Range: 4 - 9
+      q = `${n1} × ${n2} = ?`;
+      a = n1 * n2;
+      hint = "直式計算：注意進位！先算個位，積滿十要進到十位。";
+    } else if (rand < 0.66) {
+      // Type: Harder Division (Quotient > 20)
+      const ans = Math.floor(Math.random() * 30) + 20; // Answer: 20 - 49
+      const n2 = Math.floor(Math.random() * 5) + 3;    // Divisor: 3 - 7
+      const total = ans * n2;
+      q = `${total} ÷ ${n2} = ?`;
+      a = ans;
+      hint = `試用直式除法：先看十位夠不夠除，不夠就看兩位。`;
+    } else {
+      // Type: Word Problem (Larger numbers)
+      const item = getRandomItem();
+      const count = Math.floor(Math.random() * 6) + 4; // Count: 4 - 9
+      const price = Math.floor(Math.random() * 30) + 25; // Price: $25 - $54
+      q = `老師買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
+      a = price * count;
+      hint = `較大的數字乘法。$${price} × ${count}，建議用直式計算。`;
+    }
+  } 
+  
+  // --- HIGH DIFFICULTY (3-digit, Multi-step) ---
+  else { 
     score = 20; penalty = 10;
     if (rand < 0.3) {
       // Type: 3-digit x 1-digit
@@ -154,13 +153,12 @@ const generateQuestion = (difficulty) => {
       hint = "平均分就是除法。請計算 " + totalMoney + " ÷ " + people + "。";
     } else {
       // Type: Multi-step / Logic (Remaining Money)
-      const wallet = Math.floor(Math.random() * 5) * 10 + 200; // 200, 210...
+      const wallet = Math.floor(Math.random() * 5) * 10 + 300; // 300+
       const item = getRandomItem();
-      const count = Math.floor(Math.random() * 3) + 2;
-      const price = Math.floor(Math.random() * 30) + 20; 
-      // Ensure affordable
+      const count = Math.floor(Math.random() * 4) + 2;
+      const price = Math.floor(Math.random() * 40) + 30; 
+      
       if (price * count > wallet) { 
-         // Fallback if random gen makes it too expensive, simplify logic
          q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}共需多少元？`;
          a = price * count;
          hint = `計算 ${price} × ${count} 即可。`;
@@ -557,7 +555,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.1</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.3</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
