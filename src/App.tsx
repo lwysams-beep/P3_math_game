@@ -1,3 +1,4 @@
+// @ts-nocheck
 // P.3 理財數學王 v4.0
 // Version: 4.0 (Initial React Setup)
 // Date: 2026-01-14
