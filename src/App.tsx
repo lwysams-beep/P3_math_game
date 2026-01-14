@@ -1,10 +1,10 @@
 // @ts-nocheck
-// P.3 理財數學王 v5.5 (Score Accumulation Display)
+// P.3 理財數學王 v5.6 (Reset Fix & Redemption Log)
 // Date: 2026-01-14
 // Fixes: 
-// 1. Explicitly labeled the score display as "Total (累積)" in the Game View to encourage accumulation.
-// 2. Increased font size for Timer and Score for better visibility on iPad.
-// 3. Added "Time (時間)" label.
+// 1. Fixed "Back to Home" in Student View to fully reset game state (no refresh needed).
+// 2. Added "Redemption Log" generation when NET redeems coins (visible on Dashboard).
+// 3. Log Format: "StudentName exchanged $XX HKD at ShopName".
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -13,7 +13,7 @@ import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTim
 import { 
   Trophy, User, Coins, ArrowLeft, CheckCircle2, XCircle, 
   Calculator, Store, Wallet, Lock, Settings, LogOut, 
-  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check, Undo2, FileDown
+  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check, Undo2, FileDown, History
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -358,6 +358,21 @@ const App = () => {
   }, [user, view]);
 
   // --- Logic ---
+  
+  // RESET LOGIC FOR BACK TO HOME
+  const handleBackToHome = () => {
+    setStudentView('class_select');
+    setCurrentStudent(null);
+    setSessionScore(0);
+    setTotalAccumulatedScore(0);
+    setSessionCorrect(0);
+    setSessionWrong(0);
+    setStrikes(0);
+    setCurrentQuestion(null);
+    setIsStarting(false);
+    setView('home');
+  };
+
   const startGame = async () => {
     if (!currentStudent) {
       alert("請先選擇學生 (Please select a student)");
@@ -380,7 +395,7 @@ const App = () => {
 
     setGameActive(true);
     setSessionScore(0);
-    setSessionCorrect(0); // Reset local counters for session view
+    setSessionCorrect(0); 
     setSessionWrong(0);
     setStrikes(0);
     setTimeLeft(GAME_DURATION);
@@ -401,7 +416,6 @@ const App = () => {
           prevWrong = snap.data().wrongCount || 0;
         }
         setTotalAccumulatedScore(prevScore); 
-        // We accumulate locally for display, but main truth is in DB
         setSessionCorrect(prevCorrect);
         setSessionWrong(prevWrong);
 
@@ -473,7 +487,6 @@ const App = () => {
         setFeedback({ ok: false, msg: `3次錯誤！扣 ${penalty} 分。答案是 ${currentQuestion.a}` });
         
         if(!offlineMode && user && currentStudent) {
-          // Track specific error category
           const errField = `errors.${currentQuestion.category}`;
           updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { 
             score: increment(-penalty),
@@ -500,15 +513,25 @@ const App = () => {
     }
   };
 
-  const toggleRedeem = async (studentId, currentStatus) => {
+  const toggleRedeem = async (student, currentStatus) => {
     if(!user) return;
+    
+    // Undo
     if (currentStatus) {
       if (!confirm("⚠️ 確定要撤銷此兌換嗎？(Undo this redemption?)")) return;
     }
+
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', studentId), { 
-        redeemed: !currentStatus 
-      });
+      const updateData = { redeemed: !currentStatus };
+      
+      // LOG GENERATION (Only when redeeming)
+      if (!currentStatus && selectedShop) {
+         const hkd = student.score * selectedShop.rate;
+         const logMsg = `${student.name_en} exchanged $${hkd} HKD at ${selectedShop.name_en}`;
+         updateData.lastLog = logMsg;
+      }
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', student.id), updateData);
     } catch(e) {
       alert("Action failed (Check connection)");
     }
@@ -542,6 +565,7 @@ const App = () => {
           status: 'ready',
           correctCount: 0,
           wrongCount: 0,
+          lastLog: '', // Reset log
           'errors.mul': 0,
           'errors.div': 0,
           'errors.app': 0,
@@ -565,7 +589,6 @@ const App = () => {
       const total = correct + wrong;
       const accuracy = total > 0 ? ((correct / total) * 100).toFixed(1) : "0.0";
       
-      // Analysis Logic
       let analysis = "表現均衡 (Balanced)";
       const errs = s.errors || {};
       const maxErr = Math.max(errs.mul || 0, errs.div || 0, errs.app || 0, errs.logic || 0);
@@ -616,7 +639,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.5</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.6</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -639,7 +662,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="w-full h-full max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 flex flex-col">
         <div className="bg-orange-500 p-4 text-white flex justify-between items-center shrink-0">
-          <button onClick={() => setView('home')}><ArrowLeft/></button>
+          <button onClick={handleBackToHome}><ArrowLeft/></button>
           <h2 className="font-bold">比賽專區 (Student Zone)</h2>
           <div className="w-6"></div>
         </div>
@@ -767,7 +790,7 @@ const App = () => {
                 </div>
               </div>
               <p className="font-bold text-slate-400 text-xl">Go to Exchange Shop!</p>
-              <button onClick={() => setView('home')} className="text-slate-400 font-bold underline text-lg">Back Home</button>
+              <button onClick={handleBackToHome} className="text-slate-400 font-bold underline text-lg">Back Home</button>
             </div>
           )}
         </div>
@@ -825,25 +848,35 @@ const App = () => {
                 {liveData.filter(d => d.class === cls).map(s => {
                   const hkd = s.score * selectedShop.rate;
                   return (
-                    <div key={s.id} className={`p-3 rounded-xl border-2 flex justify-between items-center ${s.redeemed ? 'bg-green-50 border-green-200 opacity-60' : 'bg-white border-slate-100'}`}>
-                      <div>
-                        <span className="font-bold text-md block text-slate-800">{s.name}</span>
-                        <div className="flex gap-3 text-xs mt-1">
-                          <span className="font-bold text-orange-500"><Coins size={10} className="inline mr-1"/>{s.score}</span>
-                          <span className={`font-black ${selectedShop.textColor}`}>${hkd}</span>
+                    <div key={s.id} className={`p-3 rounded-xl border-2 flex flex-col gap-2 ${s.redeemed ? 'bg-green-50 border-green-200 opacity-60' : 'bg-white border-slate-100'}`}>
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <span className="font-bold text-md block text-slate-800">{s.name}</span>
+                          <div className="flex gap-3 text-xs mt-1">
+                            <span className="font-bold text-orange-500"><Coins size={10} className="inline mr-1"/>{s.score}</span>
+                            <span className={`font-black ${selectedShop.textColor}`}>${hkd}</span>
+                          </div>
                         </div>
+                        <button 
+                          onClick={() => toggleRedeem(s, s.redeemed)} 
+                          className={`p-2 rounded-lg transition-colors ${
+                            s.redeemed 
+                              ? 'bg-green-100 text-green-600 hover:bg-red-100 hover:text-red-600' 
+                              : `${selectedShop.lightColor} hover:bg-slate-200`
+                          }`}
+                          title={s.redeemed ? "Click to Undo (撤銷)" : "Click to Redeem (兌換)"}
+                        >
+                          {s.redeemed ? <CheckCircle2 size={20}/> : <Check size={20} className={selectedShop.textColor}/>}
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => toggleRedeem(s.id, s.redeemed)} 
-                        className={`p-2 rounded-lg transition-colors ${
-                          s.redeemed 
-                            ? 'bg-green-100 text-green-600 hover:bg-red-100 hover:text-red-600' 
-                            : `${selectedShop.lightColor} hover:bg-slate-200`
-                        }`}
-                        title={s.redeemed ? "Click to Undo (撤銷)" : "Click to Redeem (兌換)"}
-                      >
-                        {s.redeemed ? <CheckCircle2 size={20}/> : <Check size={20} className={selectedShop.textColor}/>}
-                      </button>
+                      
+                      {/* REDEMPTION LOG DISPLAY */}
+                      {s.lastLog && (
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1 border-t pt-1 mt-1">
+                          <History size={10} />
+                          <span className="truncate">{s.lastLog}</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
