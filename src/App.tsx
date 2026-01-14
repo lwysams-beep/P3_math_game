@@ -1,12 +1,9 @@
 // @ts-nocheck
-// P.3 理財數學王 v5.7 (Expanded Question Bank & Smart Hints)
+// P.3 理財數學王 v5.8 (Persistent Hints)
 // Date: 2026-01-14
-// Update:
-// 1. Massive expansion of Question Generator (Formula-based > 500 variations).
-// 2. Strictly removed all "Estimation/Rounding" questions.
-// 3. Enhanced "Teacher-level" hints for wrong answers.
-// 4. Expanded Item Database for more diverse word problems.
-// 5. Retains all v5.6 features (CSV, Logs, Reset, Offline Mode).
+// Fixes: 
+// 1. Hints no longer disappear automatically on wrong answers.
+// 2. Hints persist until the student answers correctly or runs out of attempts.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -71,12 +68,10 @@ const generateQuestion = (difficulty) => {
   const rand = Math.random();
 
   // --- LOW DIFFICULTY (Foundation) ---
-  // Target: P.3 basics. 2-digit Mul (simple), 2-digit Div (exact), Simple Shop.
   if (difficulty === 'low') {
     score = 5; penalty = 2;
     if (rand < 0.35) {
       // Cat: 2-digit Multiplication (Simple numbers)
-      // e.g., 12x3, 22x4, 31x3. Avoids huge carries.
       const n2 = Math.floor(Math.random() * 4) + 2; // 2-5
       const n1 = Math.floor(Math.random() * 20) + 12; // 12-31
       q = `${n1} × ${n2} = ?`;
@@ -85,7 +80,6 @@ const generateQuestion = (difficulty) => {
       category = 'mul';
     } else if (rand < 0.7) {
       // Cat: Division (Exact, Quotient 2-9)
-      // Reverse logic: a * b = total. 
       const quotient = Math.floor(Math.random() * 8) + 2; // 2-9
       const divisor = Math.floor(Math.random() * 5) + 2;  // 2-6
       const dividend = quotient * divisor;
@@ -106,7 +100,6 @@ const generateQuestion = (difficulty) => {
   } 
   
   // --- MID DIFFICULTY (Standard) ---
-  // Target: P.3 Core. Harder 2-digit Mul, Div with larger nums, Sharing scenarios.
   else if (difficulty === 'mid') {
     score = 10; penalty = 5;
     if (rand < 0.35) {
@@ -131,7 +124,6 @@ const generateQuestion = (difficulty) => {
       const item = getRandomItem();
       const total = Math.floor(Math.random() * 50) + 30; // 30-79
       const perPerson = Math.floor(Math.random() * 6) + 3; // 3-8 (Divisor)
-      // Make it exact division for question generation
       const grandTotal = total - (total % perPerson); 
       q = `老師有 ${grandTotal} ${item.unit}${item.name}，平均分給 ${perPerson} 位同學，每人可得多少${item.unit}？`;
       a = grandTotal / perPerson;
@@ -141,7 +133,6 @@ const generateQuestion = (difficulty) => {
   } 
   
   // --- HIGH DIFFICULTY (Advanced) ---
-  // Target: P.3 Advanced. 3-digit Mul, Logic (Change), Mixed Steps.
   else { 
     score = 20; penalty = 10;
     if (rand < 0.3) {
@@ -171,9 +162,7 @@ const generateQuestion = (difficulty) => {
       const price = Math.floor(Math.random() * 15) + 10;
       const cost = price * count;
       
-      // Ensure logic is valid (Cost < Wallet)
       if (cost >= wallet) {
-         // Fallback to simple multiplication
          q = `${item.unit}${item.name}每${item.unit} $${price}，買 ${count} ${item.unit}要多少元？`;
          a = cost;
          hint = `數學老師提示：\n直接將 單價 × 數量 即可。`;
@@ -507,7 +496,9 @@ const App = () => {
           msg: `答錯了！${currentQuestion.hint} (還有 ${3 - newStrikes} 次機會)` 
         });
         setAnswer(''); 
-        setTimeout(() => setFeedback(null), 4000);
+        // Longer timeout for user to read hint
+        // REMOVED THE TIMEOUT TO MAKE HINT PERSISTENT
+        // setTimeout(() => setFeedback(null), 4000); 
       } else {
         const penalty = currentQuestion.penalty;
         setSessionScore(s => s - penalty); 
@@ -668,7 +659,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.7</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.8</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -761,7 +752,7 @@ const App = () => {
                   </div>
                   {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
                   
-                  {/* Question (Smaller font as requested - changed from 6xl/8xl to 4xl/6xl) */}
+                  {/* Question */}
                   <p className="text-4xl lg:text-6xl font-bold text-slate-800 text-center leading-tight px-4">{currentQuestion.q}</p>
                 </div>
 
