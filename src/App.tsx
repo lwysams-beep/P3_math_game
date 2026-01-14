@@ -1,11 +1,11 @@
 // @ts-nocheck
-// P.3 理財數學王 v4.9 (NET Shop-First & Admin Reset)
+// P.3 理財數學王 v5.1 (Smart Math Engine & Teacher Hints)
 // Date: 2026-01-14
 // Fixes: 
-// 1. NET Workflow changed: Login -> Select Shop -> Live Dashboard (w/ Auto Calc HKD & Quick Redeem).
-// 2. Added Student Name display in Game View.
-// 3. Reduced Question font size.
-// 4. Added "Reset All Scores" for Teacher (PWD: 61513110).
+// 1. Removed all approximation/rounding questions.
+// 2. Implemented Formula-based Question Generator (Infinite variations).
+// 3. Added Contextual Hints (Teacher Level) for wrong answers.
+// 4. Enhanced Word Problem variety (Items, Units, Prices).
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -14,7 +14,7 @@ import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTim
 import { 
   Trophy, User, Coins, ArrowLeft, CheckCircle2, XCircle, 
   Calculator, Store, Wallet, Lock, Settings, LogOut, 
-  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check
+  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check, Undo2
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
@@ -39,8 +39,8 @@ const appId = (window).__app_id || 'p3-math-finance-v4-accum';
 // --- 2. Constants ---
 const TEACHER_PWD = "26754411!";
 const NET_PWD = "english_please";
-const RESET_PWD = "61513110"; // Teacher Reset Password
-const GAME_DURATION = 300; // 5 Minutes
+const RESET_PWD = "61513110"; 
+const GAME_DURATION = 300; 
 
 const SHOPS = [
   { id: 'A', name_zh: 'A店 (快樂找換)', name_en: 'Shop A (Happy Exchange)', rate: 2, color: 'bg-emerald-600', lightColor: 'bg-emerald-50', borderColor: 'border-emerald-200', textColor: 'text-emerald-700' },
@@ -48,69 +48,131 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Smart Question Generator ---
+// --- 3. Smart Question Generator (v5.1 Logic) ---
+
+// Item Database for Word Problems
+const ITEMS_DB = [
+  { name: '蘋果', unit: '個', minP: 3, maxP: 10 },
+  { name: '擦膠', unit: '塊', minP: 2, maxP: 8 },
+  { name: '鉛筆', unit: '枝', minP: 4, maxP: 15 },
+  { name: '原子筆', unit: '枝', minP: 8, maxP: 25 },
+  { name: '間尺', unit: '把', minP: 5, maxP: 12 },
+  { name: '筆記簿', unit: '本', minP: 10, maxP: 30 },
+  { name: '故事書', unit: '本', minP: 40, maxP: 120 },
+  { name: '漫畫', unit: '本', minP: 35, maxP: 85 },
+  { name: '三文治', unit: '件', minP: 15, maxP: 28 },
+  { name: '漢堡包', unit: '個', minP: 20, maxP: 45 },
+  { name: '薯片', unit: '包', minP: 8, maxP: 18 },
+  { name: '朱古力', unit: '排', minP: 12, maxP: 35 },
+  { name: '玩具車', unit: '輛', minP: 25, maxP: 80 },
+  { name: '公仔', unit: '個', minP: 50, maxP: 150 },
+  { name: '顏色筆', unit: '盒', minP: 20, maxP: 60 }
+];
+
+const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
+
 const generateQuestion = (difficulty) => {
-  const types = ['mul', 'div', 'app', 'logic'];
-  const type = types[Math.floor(Math.random() * (difficulty === 'high' ? 4 : 3))]; 
-   
-  let q = "", a = 0, score = 0, penalty = 0;
+  let q = "", a = 0, score = 0, penalty = 0, hint = "";
+  
+  // Define templates based on difficulty
+  // Low: Basic Mul table, Simple Money Add/Sub
+  // Mid: 2-digit Mul, Simple Div, Basic Word Problems
+  // High: 3-digit Mul, Div with Remainder logic (but exact input), Multi-step Word Problems
+
+  const rand = Math.random();
 
   if (difficulty === 'low') {
     score = 5; penalty = 2;
-    if (type === 'mul') {
-      const n1 = Math.floor(Math.random() * 80) + 10; 
-      const n2 = Math.floor(Math.random() * 8) + 2;   
+    if (rand < 0.4) {
+      // Type: Basic Multiplication (Table)
+      const n1 = Math.floor(Math.random() * 8) + 2; // 2-9
+      const n2 = Math.floor(Math.random() * 9) + 1; // 1-9
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
-    } else if (type === 'div') {
-      const ans = Math.floor(Math.random() * 9) + 2;
-      const n2 = Math.floor(Math.random() * 8) + 2;
-      q = `${ans * n2} ÷ ${n2} = ?`;
-      a = ans;
+      hint = "背誦九九乘法表，想想 " + n1 + " 乘 " + n2 + " 是多少？";
+    } else if (rand < 0.7) {
+      // Type: Simple Addition (Money)
+      const p1 = Math.floor(Math.random() * 40) + 10;
+      const p2 = Math.floor(Math.random() * 40) + 10;
+      q = `$${p1} + $${p2} = ?`;
+      a = p1 + p2;
+      hint = "將兩個數值加起來，先加個位，再加十位。";
     } else {
-      const items = ['蘋果', '擦膠', '糖果', '鉛筆'];
-      const item = items[Math.floor(Math.random() * items.length)];
-      const p = Math.floor(Math.random() * 10) + 2;
-      const c = Math.floor(Math.random() * 5) + 2;
-      q = `每個${item}售 $${p}，買 ${c} 個需付多少元？`;
-      a = p * c;
+      // Type: Simple Word Problem (Concept of multiplication)
+      const item = getRandomItem();
+      const count = Math.floor(Math.random() * 4) + 2; // 2-5
+      const price = Math.floor(Math.random() * 8) + 2; // 2-9
+      q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
+      a = price * count;
+      hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count}) 就是總價。`;
     }
-  } else if (difficulty === 'mid') {
+  } 
+  
+  else if (difficulty === 'mid') {
     score = 10; penalty = 5;
-    if (type === 'mul') {
-      const n1 = Math.floor(Math.random() * 300) + 100;
-      const n2 = Math.floor(Math.random() * 8) + 2;
+    if (rand < 0.4) {
+      // Type: 2-digit x 1-digit
+      const n1 = Math.floor(Math.random() * 80) + 10; // 10-89
+      const n2 = Math.floor(Math.random() * 8) + 2;   // 2-9
       q = `${n1} × ${n2} = ?`;
       a = n1 * n2;
-    } else if (type === 'div') {
-      const ans = Math.floor(Math.random() * 20) + 10;
-      const n2 = Math.floor(Math.random() * 6) + 3;
-      q = `將 ${ans * n2} 粒糖果平均分給 ${n2} 人，每人得多少粒？`;
+      hint = "試用直式計算：先用" + n2 + "乘個位，有進位要加到十位，再乘十位。";
+    } else if (rand < 0.7) {
+      // Type: Division (Exact)
+      const ans = Math.floor(Math.random() * 15) + 4;
+      const n2 = Math.floor(Math.random() * 7) + 3; // 3-9
+      const total = ans * n2;
+      q = `${total} ÷ ${n2} = ?`;
       a = ans;
+      hint = "這是一道除法題。你可以想：" + n2 + " 乘多少會等於 " + total + "？";
     } else {
-      const n1 = Math.floor(Math.random() * 10) + 80; 
-      const n2 = Math.floor(Math.random() * 3) + 7;   
-      q = `估算：${n1} × ${n2} 的結果約是多少？(取百位整數)`;
-      a = Math.round((n1 * n2) / 100) * 100;
+      // Type: Word Problem (Shopping)
+      const item = getRandomItem();
+      const count = Math.floor(Math.random() * 6) + 3;
+      const price = Math.floor(Math.random() * 20) + 10; // 10-29
+      q = `媽媽買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
+      a = price * count;
+      hint = `總金額 = 每${item.unit}價錢 × 購買數量。試試計算 ${price} × ${count}。`;
     }
-  } else {
+  } 
+  
+  else { // High
     score = 20; penalty = 10;
-    if (type === 'mul') {
-      const n1 = Math.floor(Math.random() * 5) + 2;
-      const n2 = Math.floor(Math.random() * 20) + 10;
-      const n3 = Math.floor(Math.random() * 5) + 2;
-      q = `${n1} × ${n2} × ${n3} = ?`;
-      a = n1 * n2 * n3;
-    } else if (type === 'logic') {
-      q = "用 5, 4, 0 組成最大的三位單數，再乘以 3，結果是？";
-      a = 405 * 3; 
+    if (rand < 0.3) {
+      // Type: 3-digit x 1-digit
+      const n1 = Math.floor(Math.random() * 400) + 100; // 100-499
+      const n2 = Math.floor(Math.random() * 7) + 3;     // 3-9
+      q = `${n1} × ${n2} = ?`;
+      a = n1 * n2;
+      hint = "直式乘法：由右至左計算 (個位→十位→百位)，別忘了把進位的數加上去！";
+    } else if (rand < 0.6) {
+      // Type: Division with money context (Sharing)
+      const totalMoney = Math.floor(Math.random() * 80) * 5 + 100; // Multiples of 5
+      const people = 5;
+      q = `將 $${totalMoney} 平均分給 ${people} 人，每人可得多少元？`;
+      a = totalMoney / people;
+      hint = "平均分就是除法。請計算 " + totalMoney + " ÷ " + people + "。";
     } else {
-      const fee = 106;
-      q = `電腦班每堂 $${fee}，全期 8 堂。子言和妹妹一同報名，共需付多少元？`;
-      a = fee * 8 * 2;
+      // Type: Multi-step / Logic (Remaining Money)
+      const wallet = Math.floor(Math.random() * 5) * 10 + 200; // 200, 210...
+      const item = getRandomItem();
+      const count = Math.floor(Math.random() * 3) + 2;
+      const price = Math.floor(Math.random() * 30) + 20; 
+      // Ensure affordable
+      if (price * count > wallet) { 
+         // Fallback if random gen makes it too expensive, simplify logic
+         q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}共需多少元？`;
+         a = price * count;
+         hint = `計算 ${price} × ${count} 即可。`;
+      } else {
+         q = `小明有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。他還剩下多少元？`;
+         a = wallet - (price * count);
+         hint = `這題有兩步：\n1. 先算買東西共用了多少錢 (${price} × ${count})\n2. 再用原本有的錢減去用去的錢。`;
+      }
     }
   }
-  return { q, a, score, penalty, difficulty };
+  
+  return { q, a, score, penalty, difficulty, hint };
 };
 
 // CSV Data 
@@ -243,8 +305,7 @@ const App = () => {
 
   // NET State
   const [netPwd, setNetPwd] = useState('');
-  const [selectedShop, setSelectedShop] = useState(null); // Step 1: Shop Selection
-  // netStudent search is now part of the dashboard filter if needed, but we show live feed
+  const [selectedShop, setSelectedShop] = useState(null); 
 
   // Data Parsing
   const allStudents = useMemo(() => {
@@ -294,9 +355,8 @@ const App = () => {
     return () => clearInterval(timer);
   }, [gameActive, timeLeft]);
 
-  // Unified Live Monitor (Used by Teacher & NET)
+  // Unified Live Monitor
   useEffect(() => {
-    // Enable monitor for Teacher OR NET (once shop selected)
     if (!user || (view !== 'teacher' && view !== 'net_dashboard')) return;
     
     const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
@@ -318,7 +378,6 @@ const App = () => {
 
     setIsStarting(true);
     
-    // OFFLINE FALLBACK CHECK
     let isOffline = offlineMode;
     if (!user) {
       try {
@@ -399,9 +458,14 @@ const App = () => {
       setStrikes(newStrikes);
 
       if (newStrikes < 3) {
-        setFeedback({ ok: false, msg: `答錯了！還有 ${3 - newStrikes} 次機會` });
+        // Show HINT instead of just "Wrong"
+        setFeedback({ 
+          ok: false, 
+          msg: `答錯了！${currentQuestion.hint} (還有 ${3 - newStrikes} 次機會)` 
+        });
         setAnswer(''); 
-        setTimeout(() => setFeedback(null), 1000);
+        // Longer timeout for user to read hint
+        setTimeout(() => setFeedback(null), 4000);
       } else {
         const penalty = currentQuestion.penalty;
         setSessionScore(s => s - penalty); 
@@ -432,13 +496,17 @@ const App = () => {
     }
   };
 
-  // NET Quick Redeem from Dashboard
-  const quickRedeem = async (studentId) => {
+  const toggleRedeem = async (studentId, currentStatus) => {
     if(!user) return;
+    if (currentStatus) {
+      if (!confirm("⚠️ 確定要撤銷此兌換嗎？(Undo this redemption?)")) return;
+    }
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', studentId), { redeemed: true });
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', studentId), { 
+        redeemed: !currentStatus 
+      });
     } catch(e) {
-      alert("Redeem failed");
+      alert("Action failed (Check connection)");
     }
   };
 
@@ -451,33 +519,24 @@ const App = () => {
     }
   };
 
-  // Teacher: Reset All
   const handleResetAll = async () => {
     const pwd = prompt("請輸入重設密碼 (Enter Password to Reset All Scores):");
     if (pwd !== RESET_PWD) {
       alert("密碼錯誤 (Wrong Password)");
       return;
     }
-    
     if(!confirm("⚠️ 危險操作 Warning ⚠️\n這將重置所有學生的分數歸零，且無法復原！\n確定要執行嗎？")) return;
 
     try {
       const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
       const snapshot = await getDocs(q);
       const batch = writeBatch(db);
-      
       snapshot.docs.forEach((docSnap) => {
-        batch.update(docSnap.ref, { 
-          score: 0, 
-          redeemed: false, 
-          status: 'ready' 
-        });
+        batch.update(docSnap.ref, { score: 0, redeemed: false, status: 'ready' });
       });
-
       await batch.commit();
       alert("所有分數已重置 (All scores reset successfully).");
     } catch (e) {
-      console.error("Batch Reset Error:", e);
       alert("重置失敗 (Reset Failed): " + e.message);
     }
   };
@@ -498,7 +557,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v4.9</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v5.1</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -516,7 +575,6 @@ const App = () => {
     </div>
   );
 
-  // Student
   if (view === 'student') return (
     <div className="h-screen w-screen bg-orange-50 p-4 overflow-hidden relative">
       <ConnectionStatus/>
@@ -592,8 +650,8 @@ const App = () => {
                   </div>
                   {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
                   
-                  {/* Question (Smaller font as requested) */}
-                  <p className="text-5xl lg:text-7xl font-bold text-slate-800 text-center leading-tight">{currentQuestion.q}</p>
+                  {/* Question (Smaller font as requested - changed from 6xl/8xl to 4xl/6xl) */}
+                  <p className="text-4xl lg:text-6xl font-bold text-slate-800 text-center leading-tight px-4">{currentQuestion.q}</p>
                 </div>
 
                 <div className="w-1/3 flex flex-col gap-4">
@@ -644,7 +702,6 @@ const App = () => {
     </div>
   );
 
-  // NET
   if (view === 'net_login') return (
     <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
       <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
@@ -656,7 +713,6 @@ const App = () => {
     </div>
   );
 
-  // Step 1: Shop Selection
   if (view === 'net_select_shop') return (
     <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
       <div className="max-w-4xl w-full text-center space-y-8">
@@ -675,7 +731,6 @@ const App = () => {
     </div>
   );
 
-  // Step 2: NET Dashboard
   if (view === 'net_dashboard' && selectedShop) return (
     <div className="h-screen w-screen bg-slate-100 p-4 font-sans overflow-hidden">
       <div className="w-full h-full max-w-[98vw] mx-auto flex flex-col">
@@ -689,8 +744,6 @@ const App = () => {
           </div>
           <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
         </div>
-        
-        {/* Live Student Feed */}
         <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
           {['3A','3B','3C','3D'].map(cls => (
             <div key={cls} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
@@ -707,15 +760,17 @@ const App = () => {
                           <span className={`font-black ${selectedShop.textColor}`}>${hkd}</span>
                         </div>
                       </div>
-                      
-                      {/* Action Button */}
-                      {!s.redeemed ? (
-                        <button onClick={() => quickRedeem(s.id)} className={`p-2 rounded-lg ${selectedShop.lightColor} hover:bg-slate-200 transition-colors`}>
-                          <Check size={20} className={selectedShop.textColor}/>
-                        </button>
-                      ) : (
-                        <CheckCircle2 size={20} className="text-green-500"/>
-                      )}
+                      <button 
+                        onClick={() => toggleRedeem(s.id, s.redeemed)} 
+                        className={`p-2 rounded-lg transition-colors ${
+                          s.redeemed 
+                            ? 'bg-green-100 text-green-600 hover:bg-red-100 hover:text-red-600' 
+                            : `${selectedShop.lightColor} hover:bg-slate-200`
+                        }`}
+                        title={s.redeemed ? "Click to Undo (撤銷)" : "Click to Redeem (兌換)"}
+                      >
+                        {s.redeemed ? <CheckCircle2 size={20}/> : <Check size={20} className={selectedShop.textColor}/>}
+                      </button>
                     </div>
                   );
                 })}
@@ -727,19 +782,12 @@ const App = () => {
     </div>
   );
 
-  // Teacher
   if (view === 'teacher_login') return (
     <div className="w-screen h-screen bg-indigo-50 flex items-center justify-center p-4">
       <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
         <h2 className="text-3xl font-black">老師後台</h2>
         <input type="password" value={teacherPwd} onChange={e => setTeacherPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
-        <button onClick={() => { 
-          if(teacherPwd === TEACHER_PWD) {
-            setView('teacher');
-          } else {
-            alert('密碼錯誤 (Wrong Password)');
-          }
-        }} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-xl hover:bg-indigo-700">Login</button>
+        <button onClick={() => { if(teacherPwd === TEACHER_PWD) setView('teacher'); else alert('密碼錯誤 (Wrong Password)'); }} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-xl hover:bg-indigo-700">Login</button>
         <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
       </div>
     </div>
@@ -751,7 +799,6 @@ const App = () => {
         <div className="flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0">
           <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察 (Live Monitor)</h2>
           <div className="flex gap-4">
-            {/* RESET BUTTON */}
             <button onClick={handleResetAll} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
               <RotateCcw size={20}/> 重設所有分數
             </button>
