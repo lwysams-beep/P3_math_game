@@ -1,12 +1,11 @@
 // @ts-nocheck
-// P.3 理財數學王 v7.0 (Comprehensive Math Upgrade)
+// P.3 理財數學王 v7.1 (PDF Curriculum Integration)
 // Date: 2026-01-15
 // Fixes: 
-// 1. Added 2-digit & 3-digit Multiplication (x1 digit).
-// 2. Added 2-digit & 3-digit Division (/1 digit, Quotient 1-2 digits).
-// 3. High Difficulty is strictly 100% Word Problems with rich contexts.
-// 4. Balanced distribution of Add/Sub/Mul/Div.
-// 5. Retained CSV student list and all admin features.
+// 1. Integrated PDF concepts: Continuous Mul/Div (A x B x C), Packing, Saving, Multiples.
+// 2. 80% Probability for PDF-based Mul/Div questions, 20% for old Add/Sub.
+// 3. Low Difficulty: Simplified wording and smaller numbers.
+// 4. Enhanced hints specific to new question types.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -49,7 +48,7 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Smart Question Generator (v7.0 Logic) ---
+// --- 3. Smart Question Generator (v7.1 Logic) ---
 
 const ITEMS_DB = [
   { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
@@ -67,16 +66,18 @@ const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)
 const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// --- Helper for balanced random selection ---
-// Ensures we rotate through types: Add -> Sub -> Mul -> Div -> Add ...
-const getNextOperation = (lastType) => {
-    const ops = ['add', 'sub', 'mul', 'div'];
-    let nextOp = randomChoice(ops);
-    // Try to avoid repeat, but not strictly forbidden (randomness is good)
-    if (nextOp === lastType && Math.random() > 0.3) {
-        nextOp = randomChoice(ops.filter(o => o !== lastType));
+// Helper: Get diverse numbers for A x B x C
+const getFactors = (targetProduct) => {
+    // Simplified factor finder for small numbers
+    for(let i=2; i<9; i++) {
+        if (targetProduct % i === 0) {
+            const rem = targetProduct / i;
+            for(let j=2; j<9; j++) {
+                if (rem % j === 0) return [i, j, rem/j];
+            }
+        }
     }
-    return nextOp;
+    return [2, 2, Math.floor(targetProduct/4)];
 };
 
 const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) => {
@@ -85,159 +86,204 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
   let subType = "";
   let attempts = 0;
 
-  // Pattern for Low/Mid: 2 Calc, 1 App. High: Always App.
-  const isAppTurn = difficulty === 'high' || (questionIndex % 3 === 0); 
+  // Rule: High difficulty is 100% Word Problems
+  // Low/Mid: 2 Calc, 1 App (or random based on PDF logic)
+  // New Rule v7.1: 80% PDF types (Mul/Div), 20% Add/Sub
   
   do {
     attempts++;
-    
-    // 1. Determine Operation (Balanced Distribution)
-    const op = getNextOperation(lastType);
-    category = op;
+    const isPdfType = Math.random() < 0.8; 
+    const isApp = (difficulty === 'high') || (questionIndex % 3 === 0);
 
     // ==========================================
-    // CALCULATION QUESTIONS (Low/Mid only)
+    // 80% CHANCE: PDF TOPICS (Mul / Div)
     // ==========================================
-    if (!isAppTurn) {
-        if (op === 'add') {
-            // 4-Digit Addition
-            const n1 = randomInt(1000, 5000);
-            const n2 = randomInt(1000, 4000);
-            q = `${n1} + ${n2} = ?`;
-            a = n1 + n2;
-            hint = `試用直式加法：由個位加起，滿十進一。`;
-            subType = 'calc_add_4d';
-            signature = `add-${n1}-${n2}`;
-
-        } else if (op === 'sub') {
-            // 4-Digit Subtraction
-            const n1 = randomInt(2000, 9900);
-            const n2 = randomInt(1000, n1 - 100);
-            q = `${n1} - ${n2} = ?`;
-            a = n1 - n2;
-            hint = `試用直式減法：由個位減起，不夠減向十位借位。`;
-            subType = 'calc_sub_4d';
-            signature = `sub-${n1}-${n2}`;
-
-        } else if (op === 'mul') {
-            // Multiplication: 2d x 1d OR 3d x 1d
-            const is3d = (difficulty === 'mid' && Math.random() > 0.5); // Mid gets more 3d
-            if (is3d) {
-                const n1 = randomInt(100, 400);
-                const n2 = randomInt(2, 6);
+    if (isPdfType) {
+        category = Math.random() < 0.5 ? 'mul' : 'div';
+        
+        // --- MULTIPLICATION (PDF Based) ---
+        if (category === 'mul') {
+            const pattern = Math.random();
+            
+            // Pattern 1: Continuous Multiplication (A x B x C) (From 乘1.pdf)
+            if (pattern < 0.3 && !isApp) {
+                let n1, n2, n3;
+                if (difficulty === 'low') {
+                    n1 = randomInt(2, 5); n2 = randomInt(2, 4); n3 = randomInt(2, 3);
+                    hint = `連乘法：先算 ${n1} × ${n2}，答案再乘 ${n3}。`;
+                } else {
+                    n1 = randomInt(4, 9); n2 = randomInt(2, 8); n3 = randomInt(2, 5);
+                    hint = `連乘法：由左至右計算。`;
+                }
+                q = `${n1} × ${n2} × ${n3} = ?`;
+                a = n1 * n2 * n3;
+                subType = 'pdf_mul_cont';
+                signature = `pmc-${n1}-${n2}-${n3}`;
+            } 
+            
+            // Pattern 2: 2/3 Digit x 1 Digit (From 乘3.pdf)
+            else if (pattern < 0.6 && !isApp) {
+                let n1, n2;
+                if (difficulty === 'low') {
+                    n1 = randomInt(12, 35); n2 = randomInt(2, 5); // Simpler
+                    hint = `直式乘法：先乘個位。`;
+                } else if (difficulty === 'mid') {
+                    n1 = randomInt(36, 99); n2 = randomInt(3, 9);
+                    hint = `直式乘法：注意進位。`;
+                } else {
+                     n1 = randomInt(120, 450); n2 = randomInt(3, 8);
+                     hint = `三位數乘法：個、十、百位逐一計算。`;
+                }
                 q = `${n1} × ${n2} = ?`;
                 a = n1 * n2;
-                hint = `三位數乘法：先乘個位，再乘十位，最後乘百位。`;
-            } else {
-                const n1 = randomInt(12, 95);
-                const n2 = randomInt(2, 8);
-                q = `${n1} × ${n2} = ?`;
-                a = n1 * n2;
-                hint = `兩位數乘法：注意進位。`;
+                subType = 'pdf_mul_std';
+                signature = `pms-${n1}-${n2}`;
             }
-            subType = 'calc_mul';
-            signature = `mul-${a}`;
 
-        } else if (op === 'div') {
-            // Division: 2d/1d OR 3d/1d
-            const is3d = (difficulty === 'mid' && Math.random() > 0.5);
-            const divisor = randomInt(2, 8);
-            let quotient;
-            
-            if (is3d) {
-                // Quotient can be 1 or 2 digits (e.g., 400/5=80, 120/4=30)
-                quotient = randomInt(10, 99); 
-            } else {
-                quotient = randomInt(10, 45); // 2-digit
+            // Pattern 3: Word Problems (Multiples / Total) (From 乘2.pdf)
+            else {
+                const item = getRandomItem();
+                if (difficulty === 'low') {
+                    // Simple wording for Low
+                    const count = randomInt(2, 5);
+                    const price = randomInt(10, 20);
+                    q = `每${item.unit} $${price}，買 ${count} ${item.unit}共多少元？`;
+                    a = price * count;
+                    hint = `單價 × 數量 = 總價。`;
+                } else if (Math.random() < 0.5) {
+                    // Capacity / Multiples Logic (From 乘2.pdf)
+                    const smallCap = randomInt(20, 80);
+                    const factor = randomInt(3, 6);
+                    q = `A 廳可容納 ${smallCap} 人，B 廳可容納的人數是 A 廳的 ${factor} 倍。B 廳可容納多少人？`;
+                    a = smallCap * factor;
+                    hint = `關鍵字「${factor} 倍」，用乘法。`;
+                } else {
+                    // Regular Shopping
+                    const count = randomInt(4, 9);
+                    const price = randomInt(25, 150);
+                    q = `學校訂購 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
+                    a = price * count;
+                    hint = `單價($${price}) × 數量(${count})。`;
+                }
+                subType = 'pdf_mul_app';
+                signature = `pma-${a}`;
             }
-            
-            const dividend = quotient * divisor;
-            // Ensure dividend digit count matches intent
-            if ((is3d && dividend < 100) || (!is3d && dividend > 99)) continue; // Retry
+        } 
+        
+        // --- DIVISION (PDF Based) ---
+        else {
+            const pattern = Math.random();
 
-            q = `${dividend} ÷ ${divisor} = ?`;
-            a = quotient;
-            hint = `試用直式除法：${dividend} 除以 ${divisor}。`;
-            subType = 'calc_div';
-            signature = `div-${dividend}-${divisor}`;
+            // Pattern 1: Continuous Division (A / B / C) (From 除1.pdf, 除2.pdf)
+            if (pattern < 0.3 && !isApp) {
+                let n1, n2, dividend;
+                if (difficulty === 'low') {
+                    n1 = 2; n2 = 2; dividend = randomInt(3, 8) * 4; // e.g. 20 / 2 / 2
+                } else {
+                    n1 = randomInt(2, 6); n2 = randomInt(2, 6);
+                    const final = randomInt(5, 20);
+                    dividend = final * n1 * n2;
+                }
+                q = `${dividend} ÷ ${n1} ÷ ${n2} = ?`;
+                a = dividend / n1 / n2;
+                hint = `連除法：先算 ${dividend} ÷ ${n1}，答案再除以 ${n2}。`;
+                subType = 'pdf_div_cont';
+                signature = `pdc-${dividend}-${n1}-${n2}`;
+            }
+
+            // Pattern 2: Standard Division (2d/3d by 1d) (From 除3.pdf)
+            else if (pattern < 0.6 && !isApp) {
+                let divisor, quotient, dividend;
+                if (difficulty === 'low') {
+                    divisor = randomInt(2, 5);
+                    quotient = randomInt(11, 19); // Ensure 2 digit answer, but small
+                } else {
+                    divisor = randomInt(3, 9);
+                    quotient = randomInt(12, 120); // Can be 3-digit dividend
+                }
+                dividend = divisor * quotient;
+                
+                // Filter out simple ones like 55/5 if Mid/High
+                if (difficulty !== 'low' && quotient % 11 === 0) continue;
+
+                q = `${dividend} ÷ ${divisor} = ?`;
+                a = quotient;
+                hint = `試用直式除法。先看最高位夠不夠除。`;
+                subType = 'pdf_div_std';
+                signature = `pds-${dividend}-${divisor}`;
+            }
+
+            // Pattern 3: Word Problems (Packing / Leftovers) (From 除4.pdf, 除5.pdf)
+            else {
+                const item = getRandomItem();
+                if (difficulty === 'low') {
+                    // Simple wording
+                    const total = randomInt(20, 50);
+                    const perGroup = randomInt(2, 5);
+                    const realTotal = total - (total % perGroup); // Make exact
+                    q = `有 ${realTotal} ${item.unit}${item.name}，每 ${perGroup} ${item.unit}放一袋，可放多少袋？`;
+                    a = realTotal / perGroup;
+                    hint = `總數 ÷ 每袋數量 = 袋數。`;
+                } else if (Math.random() < 0.5) {
+                    // Leftover Logic (Remainder asked but input assumes handling)
+                    // Note: Game only accepts single number input, so asking for Quotient typically
+                    const total = randomInt(100, 500);
+                    const pack = randomInt(4, 9);
+                    const leftover = total % pack;
+                    const realTotal = total - leftover; // We ask for full packs
+                    q = `有 ${realTotal} ${item.unit}${item.name}，每 ${pack} ${item.unit}包裝成一盒，共可包裝成多少盒？`;
+                    a = realTotal / pack;
+                    hint = `用除法計算。`;
+                } else {
+                    // Sharing
+                    const totalMoney = randomInt(20, 80) * 10;
+                    const people = randomInt(3, 8);
+                    const realMoney = totalMoney - (totalMoney % people);
+                    q = `將 $${realMoney} 平均分給 ${people} 人，每人得多少元？`;
+                    a = realMoney / people;
+                    hint = `「平均分」就是除法。`;
+                }
+                subType = 'pdf_div_app';
+                signature = `pda-${a}`;
+            }
         }
     } 
     
     // ==========================================
-    // WORD PROBLEM QUESTIONS (High: All, Low/Mid: 1/3)
+    // 20% CHANCE: OLD ADD/SUB (Context Variety)
     // ==========================================
     else {
-        const item = getRandomItem();
+        const op = Math.random() < 0.5 ? 'add' : 'sub';
+        category = op;
         
-        if (op === 'add') {
-            // 4-Digit Addition Application
-            const n1 = randomInt(1200, 4500);
-            const n2 = randomInt(1100, 3000);
-            
-            if (Math.random() > 0.5) {
-                q = `圖書館有中文書 ${n1} 本，英文書 ${n2} 本。圖書館共有書多少本？`;
-                hint = `求總數用加法：中文書 + 英文書。`;
-            } else {
-                q = `上午有 ${n1} 人進入主題公園，下午有 ${n2} 人進入。全日共有多少人入場？`;
-                hint = `將上午和下午的人數相加。`;
-            }
-            a = n1 + n2;
-            subType = 'app_add_4d';
-            signature = `app-add-${n1}-${n2}`;
-
-        } else if (op === 'sub') {
-            // 4-Digit Subtraction Application
-            const total = randomInt(3000, 8000);
-            const used = randomInt(1000, 2500);
-            
-            if (Math.random() > 0.5) {
-                q = `爸爸原本有 $${total}，買了一部電腦用了 $${used}。他還剩下多少元？`;
-                hint = `求剩下，用減法：原本 - 用去。`;
-            } else {
-                q = `A村有 ${total} 名村民，B村有 ${used} 名村民。A村比B村多多少人？`;
-                hint = `比較數量用減法：大數 - 小數。`;
-            }
-            a = total - used;
-            subType = 'app_sub_4d';
-            signature = `app-sub-${total}-${used}`;
-
-        } else if (op === 'mul') {
-            // Multiplication Application (Shopping / Savings)
-            const count = randomInt(3, 8); // 1-digit
-            const price = difficulty === 'high' ? randomInt(120, 450) : randomInt(25, 95); // 2d or 3d
-            
-            if (Math.random() > 0.5) {
-                q = `學校旅行，每位同學需付車費 $${price}。${count} 位同學共需付多少元？`;
-                hint = `單價($${price}) × 人數(${count})。`;
-            } else {
-                q = `小明每個月儲蓄 $${price}，${count} 個月後他共儲蓄了多少元？`;
-                hint = `每個月存一樣的錢，用乘法計算總額。`;
-            }
-            a = price * count;
-            subType = 'app_mul';
-            signature = `app-mul-${price}-${count}`;
-
-        } else if (op === 'div') {
-            // Division Application (Sharing / Average)
-            const divisor = randomInt(3, 8); // 1-digit
-            // Quotient can be 1 or 2 digits
-            const quotient = difficulty === 'high' ? randomInt(12, 120) : randomInt(10, 50);
-            const dividend = divisor * quotient; // 2d or 3d
-            
-            if (Math.random() > 0.5) {
-                q = `老師有 ${dividend} 粒糖果，平均分給 ${divisor} 位同學，每人可得多少粒？`;
-                hint = `關鍵字是「平均分」，這代表要用除法 (${dividend} ÷ ${divisor})。`;
-            } else {
-                q = `農夫收成了 ${dividend} 公斤水果，每 ${divisor} 公斤裝成一箱，可裝成多少箱？`;
-                hint = `總重量 (${dividend}) 除以 每箱重量 (${divisor})。`;
-            }
-            a = quotient;
-            subType = 'app_div';
-            signature = `app-div-${dividend}-${divisor}`;
+        if (!isAppTurn) {
+             if (op === 'add') {
+                const n1 = randomInt(1000, 4000); const n2 = randomInt(1000, 3000);
+                q = `${n1} + ${n2} = ?`; a = n1 + n2; hint = "四位數加法：留意進位。";
+             } else {
+                const n1 = randomInt(2000, 8000); const n2 = randomInt(1000, n1-500);
+                q = `${n1} - ${n2} = ?`; a = n1 - n2; hint = "四位數減法：留意借位。";
+             }
+             subType = 'calc_old';
+             signature = `old-${a}`;
+        } else {
+             // 4-Digit Apps
+             const n1 = randomInt(1200, 4500); const n2 = randomInt(1000, 3000);
+             if (op === 'add') {
+                 q = `上午有 ${n1} 人，下午有 ${n2} 人，全日共有多少人？`;
+                 a = n1 + n2;
+                 hint = "求總數用加法。";
+             } else {
+                 const total = n1 + n2;
+                 q = `倉庫有 ${total} 公斤米，運走了 ${n2} 公斤，還剩下多少？`;
+                 a = n1;
+                 hint = "求剩下用減法。";
+             }
+             subType = 'app_old';
+             signature = `old-app-${a}`;
         }
     }
 
-    // Assign Score based on difficulty
     if (difficulty === 'low') { score = 5; penalty = 2; }
     else if (difficulty === 'mid') { score = 10; penalty = 5; }
     else { score = 20; penalty = 10; }
@@ -247,7 +293,7 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
   return { q, a, score, penalty, difficulty, hint, category, signature, subType };
 };
 
-// CSV Data 
+// CSV Data (Placeholder - User will paste their own)
 const RAW_CSV_DATA = `學生註冊編號,學年,級別,班別代碼,班號,學生編號,英文姓名,中文姓名
 W23083,2025,P3,3A,1,S9014979,CHAN SHEUNG KI,陳尚頎
 W23126,2025,P3,3A,2,S9198301,CHU HOI TUNG,朱凱彤
@@ -321,7 +367,7 @@ W23138,2025,P3,3C,19,S9255021,MUI TSZ TO,梅子滔
 W23066,2025,P3,3C,20,S9037430,NGAN WING KEI,顏詠琪
 W23143,2025,P3,3C,21,S9318854,SIN CHEUK LAM,冼卓琳
 W23051,2025,P3,3C,22,S8979148,WONG HEI NAM,黃希楠
-W23052,2025,P3,3C,23,S9037499,WONG YAN TING,黃欣婷
+W23052,2025,P3,3C,23,S8979130,WONG HIU YAN,黃曉欣
 W23108,2025,P3,3C,24,S9043286,YU CHUN HEI,余俊希
 W23109,2025,P3,3C,25,S9043294,ZHAO YAN LONG,趙言朗
 W23110,2025,P3,3D,1,S9042220,AU-YEUNG SUM YUET,歐陽心悅
@@ -361,7 +407,7 @@ const App = () => {
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [questionCount, setQuestionCount] = useState(0); 
   const [lastQSignature, setLastQSignature] = useState(''); 
-  const [lastQuestionType, setLastQuestionType] = useState(''); // NEW: Track last type for High Difficulty
+  const [lastQuestionType, setLastQuestionType] = useState('');
    
   // Game State
   const [timeLeft, setTimeLeft] = useState(GAME_DURATION);
@@ -385,20 +431,17 @@ const App = () => {
   const [netPwd, setNetPwd] = useState('');
   const [selectedShop, setSelectedShop] = useState(null); 
 
-  // Data Parsing (Fixed for user's CSV format)
+  // Data Parsing
   const allStudents = useMemo(() => {
-    // RAW_CSV_DATA should contain the pasted content from "StuInfo_All(3A,3B,3C,3D).csv"
-    // Format: ... Class(Col 3), Num(Col 4), ... EngName(Col 6), ChiName(Col 7) ...
     const lines = RAW_CSV_DATA.trim().split('\n').slice(1);
     return lines.map(line => {
-      // Split by comma, handling potential quotes if necessary (simple split for now)
       const p = line.split(',');
-      if (p.length < 8) return null; // Skip invalid lines
+      if (p.length < 8) return null; 
 
-      const cls = p[3]?.trim();     // Column D -> Index 3
-      const num = parseInt(p[4]?.trim()); // Column E -> Index 4
-      const name_zh = p[7]?.trim(); // Column H -> Index 7
-      const name_en = p[6]?.trim(); // Column G -> Index 6
+      const cls = p[3]?.trim();     
+      const num = parseInt(p[4]?.trim()); 
+      const name_zh = p[7]?.trim(); 
+      const name_en = p[6]?.trim(); 
 
       if (!cls || !name_zh) return null;
 
@@ -409,16 +452,14 @@ const App = () => {
         name_en: name_en, 
         id: `${cls}_${num}` 
       };
-    }).filter(Boolean); // Remove nulls
+    }).filter(Boolean); 
   }, []);
 
   const studentsByClass = useMemo(() => {
     const map = { '3A': [], '3B': [], '3C': [], '3D': [] };
-    // Sort by class number numerically
     allStudents.forEach(s => { 
       if(map[s.class]) map[s.class].push(s); 
     });
-    // Sort each class array
     Object.keys(map).forEach(k => {
       map[k].sort((a, b) => a.number - b.number);
     });
@@ -488,7 +529,6 @@ const App = () => {
 
   // --- Logic ---
   
-  // RESET LOGIC FOR BACK TO HOME (Full Reset)
   const handleBackToHome = () => {
     setStudentView('class_select');
     setCurrentStudent(null);
@@ -503,7 +543,6 @@ const App = () => {
     setView('home');
   };
 
-  // PLAY AGAIN LOGIC (Keep Student, Reset Session)
   const handlePlayAgain = () => {
     setSessionScore(0);
     setSessionCorrect(0);
@@ -512,7 +551,7 @@ const App = () => {
     setCurrentQuestion(null);
     setIsStarting(false);
     setLastQuestionType('');
-    setStudentView('difficulty'); // Go to difficulty select directly
+    setStudentView('difficulty'); 
   };
 
   const startGame = async () => {
@@ -541,9 +580,9 @@ const App = () => {
     setSessionWrong(0);
     setStrikes(0);
     setTimeLeft(GAME_DURATION);
-    setQuestionCount(0); // Reset question count for 2:1 ratio
+    setQuestionCount(0);
     
-    const q = generateQuestion(difficulty, 1, '', ''); // First question, no history
+    const q = generateQuestion(difficulty, 1, '', '');
     setCurrentQuestion(q);
     setLastQSignature(q.signature);
     setLastQuestionType(q.subType);
@@ -568,7 +607,7 @@ const App = () => {
           name: currentStudent.name_zh,
           name_en: currentStudent.name_en,
           class: currentStudent.class,
-          number: currentStudent.number, // Save class number
+          number: currentStudent.number,
           status: 'playing',
           score: prevScore,
           correctCount: prevCorrect,
@@ -612,7 +651,6 @@ const App = () => {
         setAnswer('');
         setStrikes(0);
         
-        // Generate Next Question
         const nextCount = questionCount + 1;
         setQuestionCount(nextCount);
         const q = generateQuestion(difficulty, nextCount + 1, lastQSignature, lastQuestionType);
@@ -623,11 +661,8 @@ const App = () => {
       }, 800);
 
     } else {
-      // Wrong Answer Logic
       const newStrikes = strikes + 1;
       setStrikes(newStrikes);
-      
-      // Trigger Shake Animation
       setShake(true);
       setTimeout(() => setShake(false), 500);
 
@@ -637,7 +672,6 @@ const App = () => {
           msg: `答錯了！${currentQuestion.hint} (還有 ${3 - newStrikes} 次機會)` 
         });
         setAnswer(''); 
-        // Hint stays
       } else {
         const penalty = currentQuestion.penalty;
         setSessionScore(s => s - penalty); 
@@ -659,7 +693,6 @@ const App = () => {
           setAnswer('');
           setStrikes(0);
           
-          // Generate Next Question
           const nextCount = questionCount + 1;
           setQuestionCount(nextCount);
           const q = generateQuestion(difficulty, nextCount + 1, lastQSignature, lastQuestionType);
@@ -682,22 +715,17 @@ const App = () => {
 
   const toggleRedeem = async (student, currentStatus) => {
     if(!user) return;
-    
-    // Undo
     if (currentStatus) {
       if (!confirm("⚠️ 確定要撤銷此兌換嗎？(Undo this redemption?)")) return;
     }
 
     try {
       const updateData = { redeemed: !currentStatus };
-      
-      // LOG GENERATION (Only when redeeming)
       if (!currentStatus && selectedShop) {
          const hkd = student.score * selectedShop.rate;
          const logMsg = `${student.name_en} exchanged $${hkd} HKD at ${selectedShop.name_en}`;
          updateData.lastLog = logMsg;
       }
-
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', student.id), updateData);
     } catch(e) {
       alert("Action failed (Check connection)");
@@ -726,11 +754,9 @@ const App = () => {
       const snapshot = await getDocs(q);
       const batch = writeBatch(db);
       snapshot.docs.forEach((docSnap) => {
-        // Only reset redemption status, keep scores
         batch.update(docSnap.ref, { 
           redeemed: false, 
-          // Optional: clear log if we want to reset the history of redemption
-          lastLog: '' // Or keep log but reset status, decided to clear log to avoid confusion
+          lastLog: '' 
         });
       });
       await batch.commit();
@@ -835,7 +861,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v7.0</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v7.1</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
