@@ -1,11 +1,12 @@
 // @ts-nocheck
-// P.3 理財數學王 v6.9 (Curriculum Update: 4-Digit & Specific Division)
+// P.3 理財數學王 v7.0 (Comprehensive Math Upgrade)
 // Date: 2026-01-15
 // Fixes: 
-// 1. REMOVED: Mixed Multiplication/Addition questions.
-// 2. ADDED (All Levels): 4-Digit Addition & Subtraction (Calculation & Word Problems).
-// 3. ADDED (Mid Level): Specific Word Problems for "3-digit / 1-digit = 2-digit".
-// 4. Data: Uses full student list from CSV.
+// 1. Added 2-digit & 3-digit Multiplication (x1 digit).
+// 2. Added 2-digit & 3-digit Division (/1 digit, Quotient 1-2 digits).
+// 3. High Difficulty is strictly 100% Word Problems with rich contexts.
+// 4. Balanced distribution of Add/Sub/Mul/Div.
+// 5. Retained CSV student list and all admin features.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -48,7 +49,7 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Smart Question Generator (v6.9 Logic) ---
+// --- 3. Smart Question Generator (v7.0 Logic) ---
 
 const ITEMS_DB = [
   { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
@@ -64,351 +65,182 @@ const ITEMS_DB = [
 
 const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
 const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+const randomChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// --- GENERATOR FUNCTION ---
+// --- Helper for balanced random selection ---
+// Ensures we rotate through types: Add -> Sub -> Mul -> Div -> Add ...
+const getNextOperation = (lastType) => {
+    const ops = ['add', 'sub', 'mul', 'div'];
+    let nextOp = randomChoice(ops);
+    // Try to avoid repeat, but not strictly forbidden (randomness is good)
+    if (nextOp === lastType && Math.random() > 0.3) {
+        nextOp = randomChoice(ops.filter(o => o !== lastType));
+    }
+    return nextOp;
+};
+
 const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) => {
   let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
   let signature = "";
-  let subType = ""; 
+  let subType = "";
   let attempts = 0;
 
-  // Pattern: 2 Calc, 1 App
-  const isAppTurn = (questionIndex % 3 === 0); 
+  // Pattern for Low/Mid: 2 Calc, 1 App. High: Always App.
+  const isAppTurn = difficulty === 'high' || (questionIndex % 3 === 0); 
   
   do {
     attempts++;
-    const rand = Math.random();
+    
+    // 1. Determine Operation (Balanced Distribution)
+    const op = getNextOperation(lastType);
+    category = op;
 
     // ==========================================
-    // LOW DIFFICULTY
-    // Focus: 2-digit Mul/Div, and 4-digit Add/Sub (Standard)
+    // CALCULATION QUESTIONS (Low/Mid only)
     // ==========================================
-    if (difficulty === 'low') {
-      score = 5; penalty = 2;
-      
-      if (!isAppTurn) { // Calculation
-        if (rand < 0.25) {
-          // 4-Digit Addition (New)
-          const n1 = randomInt(1000, 5000);
-          const n2 = randomInt(1000, 4000);
-          q = `${n1} + ${n2} = ?`;
-          a = n1 + n2;
-          hint = `試用直式加法：由個位加起，滿十進一。`;
-          category = 'add';
-          subType = 'calc_add_4d';
-          signature = `add-${n1}-${n2}`;
-        } else if (rand < 0.5) {
-          // 4-Digit Subtraction (New)
-          const n1 = randomInt(2000, 9999);
-          const n2 = randomInt(1000, n1 - 100);
-          q = `${n1} - ${n2} = ?`;
-          a = n1 - n2;
-          hint = `試用直式減法：由個位減起，不夠減向十位借位。`;
-          category = 'sub';
-          subType = 'calc_sub_4d';
-          signature = `sub-${n1}-${n2}`;
-        } else if (rand < 0.75) {
-          // 2-digit Mul (Existing)
-          const n1 = randomInt(12, 49); 
-          const n2 = randomInt(2, 6);   
-          q = `${n1} × ${n2} = ?`;
-          a = n1 * n2;
-          hint = `試用直式計算。先算個位，再算十位。`;
-          category = 'mul';
-          subType = 'calc_mul';
-          signature = `mul-${n1}-${n2}`;
-        } else {
-          // Division (Existing)
-          const ans = randomInt(12, 19); 
-          const n2 = randomInt(2, 5);    
-          const total = ans * n2;
-          q = `${total} ÷ ${n2} = ?`;
-          a = ans;
-          hint = `背誦乘法表：${n2} 乘什麼數會等於 ${total}？`;
-          category = 'div';
-          subType = 'calc_div';
-          signature = `div-${total}-${n2}`;
-        }
-      } else { // Word Problem
-        const typeRand = Math.random();
-        
-        if (typeRand < 0.4) {
-          // 4-Digit Add/Sub Application (New)
-          const isAdd = Math.random() > 0.5;
-          const n1 = randomInt(1200, 4500);
-          const n2 = randomInt(1000, 3000);
-          if (isAdd) {
-            q = `圖書館有中文書 ${n1} 本，英文書 ${n2} 本，共有書多少本？`;
+    if (!isAppTurn) {
+        if (op === 'add') {
+            // 4-Digit Addition
+            const n1 = randomInt(1000, 5000);
+            const n2 = randomInt(1000, 4000);
+            q = `${n1} + ${n2} = ?`;
             a = n1 + n2;
-            hint = `求總數，用加法：${n1} + ${n2}`;
-            category = 'add';
-          } else {
-            const total = n1 + n2; // Ensure n1 is bigger contextually
-            q = `超級市場原本有 ${total} 包米，賣出了 ${n2} 包，還剩下多少包？`;
-            a = total - n2;
-            hint = `求剩下，用減法：${total} - ${n2}`;
-            category = 'sub';
-          }
-          subType = 'app_4d_addsub';
-          signature = `app-4d-${category}-${n1}-${n2}`;
+            hint = `試用直式加法：由個位加起，滿十進一。`;
+            subType = 'calc_add_4d';
+            signature = `add-${n1}-${n2}`;
 
-        } else {
-          // Existing Shopping App
-          const item = getRandomItem();
-          const count = randomInt(2, 5); 
-          const price = randomInt(12, 25); 
-          q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
-          a = price * count;
-          hint = `單價($${price}) 乘以 數量(${count})。`;
-          category = 'app';
-          subType = 'app_shopping';
-          signature = `app-shop-${price}-${count}`;
-        }
-      }
-    } 
-    
-    // ==========================================
-    // MID DIFFICULTY
-    // Focus: Harder 4-digit Add/Sub, Specific Div (3d/1d=2d)
-    // ==========================================
-    else if (difficulty === 'mid') {
-      score = 10; penalty = 5;
-      
-      if (!isAppTurn) { 
-        if (rand < 0.3) {
-           // 4-Digit Add (Harder)
-           const n1 = randomInt(2500, 6500);
-           const n2 = randomInt(2500, 3400); // Likely to carry
-           q = `${n1} + ${n2} = ?`;
-           a = n1 + n2;
-           hint = `四位數加法：留意進位。`;
-           category = 'add';
-           subType = 'calc_add_4d';
-           signature = `add-${n1}-${n2}`;
-        } else if (rand < 0.6) {
-           // 4-Digit Sub (Harder)
-           const n1 = randomInt(5000, 9500);
-           const n2 = randomInt(2500, 4900); // Likely to borrow
-           q = `${n1} - ${n2} = ?`;
-           a = n1 - n2;
-           hint = `四位數減法：留意退位。`;
-           category = 'sub';
-           subType = 'calc_sub_4d';
-           signature = `sub-${n1}-${n2}`;
-        } else if (rand < 0.8) {
-          // Harder 2-digit Mul
-          const n1 = randomInt(35, 95); 
-          const n2 = randomInt(3, 8);   
-          q = `${n1} × ${n2} = ?`;
-          a = n1 * n2;
-          hint = "直式計算：注意進位！";
-          category = 'mul';
-          subType = 'calc_mul';
-          signature = `mul-${n1}-${n2}`;
-        } else {
-          // Harder Division
-          let ans;
-          do { ans = randomInt(13, 35); } while (ans % 10 === 0);
-          const n2 = randomInt(3, 7);    
-          const total = ans * n2;
-          q = `${total} ÷ ${n2} = ?`;
-          a = ans;
-          hint = `試用直式除法。`;
-          category = 'div';
-          subType = 'calc_div';
-          signature = `div-${total}-${n2}`;
-        }
-      } else { 
-        // --- MID APPLICATIONS ---
-        const tpl = randomInt(1, 3);
-        
-        if (tpl === 1) { 
-            // NEW: Specific Division (3-digit / 1-digit = 2-digit answer)
-            // Dividend must be >= 100. Quotient must be < 100.
-            const divisor = randomInt(3, 8);
-            const quotient = randomInt(12, 99); // 2-digit
-            const dividend = divisor * quotient;
+        } else if (op === 'sub') {
+            // 4-Digit Subtraction
+            const n1 = randomInt(2000, 9900);
+            const n2 = randomInt(1000, n1 - 100);
+            q = `${n1} - ${n2} = ?`;
+            a = n1 - n2;
+            hint = `試用直式減法：由個位減起，不夠減向十位借位。`;
+            subType = 'calc_sub_4d';
+            signature = `sub-${n1}-${n2}`;
+
+        } else if (op === 'mul') {
+            // Multiplication: 2d x 1d OR 3d x 1d
+            const is3d = (difficulty === 'mid' && Math.random() > 0.5); // Mid gets more 3d
+            if (is3d) {
+                const n1 = randomInt(100, 400);
+                const n2 = randomInt(2, 6);
+                q = `${n1} × ${n2} = ?`;
+                a = n1 * n2;
+                hint = `三位數乘法：先乘個位，再乘十位，最後乘百位。`;
+            } else {
+                const n1 = randomInt(12, 95);
+                const n2 = randomInt(2, 8);
+                q = `${n1} × ${n2} = ?`;
+                a = n1 * n2;
+                hint = `兩位數乘法：注意進位。`;
+            }
+            subType = 'calc_mul';
+            signature = `mul-${a}`;
+
+        } else if (op === 'div') {
+            // Division: 2d/1d OR 3d/1d
+            const is3d = (difficulty === 'mid' && Math.random() > 0.5);
+            const divisor = randomInt(2, 8);
+            let quotient;
             
-            // Ensure dividend is 3-digit
-            if (dividend >= 100) {
-               const item = getRandomItem();
-               q = `工廠生產了 ${dividend} ${item.unit}${item.name}，平均裝入 ${divisor} 個箱子，每箱有多少${item.unit}？`;
-               a = quotient;
-               hint = `這是除法應用題：${dividend} (三位數) ÷ ${divisor} (一位數)。`;
-               subType = 'app_div_3d1d';
-               signature = `app-div-${dividend}-${divisor}`;
-               category = 'div';
+            if (is3d) {
+                // Quotient can be 1 or 2 digits (e.g., 400/5=80, 120/4=30)
+                quotient = randomInt(10, 99); 
             } else {
-               // Fallback to shopping if numbers don't match criteria
-               const count = randomInt(5, 9);
-               const price = randomInt(15, 35);
-               const item = getRandomItem();
-               q = `買 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
-               a = price * count;
-               hint = `總金額 = 單價 × 數量。`;
-               subType = 'app_shopping';
-               signature = `app-${price}-${count}`;
-               category = 'app';
+                quotient = randomInt(10, 45); // 2-digit
             }
+            
+            const dividend = quotient * divisor;
+            // Ensure dividend digit count matches intent
+            if ((is3d && dividend < 100) || (!is3d && dividend > 99)) continue; // Retry
 
-        } else if (tpl === 2) { 
-            // 4-Digit Add/Sub App
-            const isAdd = Math.random() > 0.5;
-            if (isAdd) {
-               const n1 = randomInt(1500, 3500);
-               const n2 = randomInt(1200, 2800);
-               q = `遊樂場上午有 ${n1} 人入場，下午有 ${n2} 人，全日共有多少人入場？`;
-               a = n1 + n2;
-               hint = "將上午和下午的人數相加。";
-               category = 'add';
-            } else {
-               const n1 = randomInt(5000, 9000);
-               const n2 = randomInt(1000, 3500);
-               q = `爸爸原本有 $${n1}，買了一部電腦用了 $${n2}，他還剩下多少元？`;
-               a = n1 - n2;
-               hint = "用原本的錢減去用去的錢。";
-               category = 'sub';
-            }
-            subType = 'app_4d_mid';
-            signature = `app-4d-${category}-${a}`;
-
-        } else { 
-            // Savings (Mul)
-            const days = randomInt(6, 12);
-            const saving = randomInt(15, 45);
-            q = `小美每天儲蓄 $${saving}，${days} 天後她共儲蓄了多少元？`;
-            a = saving * days;
-            hint = `每天存一樣的錢，用乘法計算總額。`;
-            subType = 'app_savings';
-            signature = `app-${saving}-${days}`;
-            category = 'app';
+            q = `${dividend} ÷ ${divisor} = ?`;
+            a = quotient;
+            hint = `試用直式除法：${dividend} 除以 ${divisor}。`;
+            subType = 'calc_div';
+            signature = `div-${dividend}-${divisor}`;
         }
-      }
     } 
     
     // ==========================================
-    // HIGH DIFFICULTY (ALL WORD PROBLEMS, NO REPEAT TYPE)
-    // Removed Mixed Calc. Added 4-Digit.
+    // WORD PROBLEM QUESTIONS (High: All, Low/Mid: 1/3)
     // ==========================================
-    else { 
-      score = 20; penalty = 10;
-      category = 'app'; 
+    else {
+        const item = getRandomItem();
+        
+        if (op === 'add') {
+            // 4-Digit Addition Application
+            const n1 = randomInt(1200, 4500);
+            const n2 = randomInt(1100, 3000);
+            
+            if (Math.random() > 0.5) {
+                q = `圖書館有中文書 ${n1} 本，英文書 ${n2} 本。圖書館共有書多少本？`;
+                hint = `求總數用加法：中文書 + 英文書。`;
+            } else {
+                q = `上午有 ${n1} 人進入主題公園，下午有 ${n2} 人進入。全日共有多少人入場？`;
+                hint = `將上午和下午的人數相加。`;
+            }
+            a = n1 + n2;
+            subType = 'app_add_4d';
+            signature = `app-add-${n1}-${n2}`;
 
-      const HIGH_TYPES = [
-          'shopping', 'change', 'savings', // Money Mul/Sub
-          'length', 'weight', 'general_mul', 'general_div', 'leftover', // Measures & Logic
-          'add_4d', 'sub_4d' // New 4-digit Types
-      ];
-      
-      const availableTypes = HIGH_TYPES.filter(t => t !== lastType);
-      const chosenType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
-      
-      subType = chosenType; 
-      const item = getRandomItem();
+        } else if (op === 'sub') {
+            // 4-Digit Subtraction Application
+            const total = randomInt(3000, 8000);
+            const used = randomInt(1000, 2500);
+            
+            if (Math.random() > 0.5) {
+                q = `爸爸原本有 $${total}，買了一部電腦用了 $${used}。他還剩下多少元？`;
+                hint = `求剩下，用減法：原本 - 用去。`;
+            } else {
+                q = `A村有 ${total} 名村民，B村有 ${used} 名村民。A村比B村多多少人？`;
+                hint = `比較數量用減法：大數 - 小數。`;
+            }
+            a = total - used;
+            subType = 'app_sub_4d';
+            signature = `app-sub-${total}-${used}`;
 
-      // -- 4-Digit Addition/Subtraction Apps --
-      if (chosenType === 'add_4d') {
-          const n1 = randomInt(2500, 4500);
-          const n2 = randomInt(1800, 4200);
-          q = `A 倉庫存有 ${n1} 公斤白米，B 倉庫存有 ${n2} 公斤。兩個倉庫共有白米多少公斤？`;
-          a = n1 + n2;
-          hint = `四位數加法：${n1} + ${n2}`;
-          signature = `high-add-${n1}-${n2}`;
-          category = 'add';
-      } else if (chosenType === 'sub_4d') {
-          const total = randomInt(5000, 9800);
-          const used = randomInt(2000, 4500);
-          q = `馬拉松比賽共有 ${total} 人報名，其中 ${used} 人完成了比賽。有多少人未完成？`;
-          a = total - used;
-          hint = `四位數減法：${total} - ${used}`;
-          signature = `high-sub-${total}-${used}`;
-          category = 'sub';
-      }
+        } else if (op === 'mul') {
+            // Multiplication Application (Shopping / Savings)
+            const count = randomInt(3, 8); // 1-digit
+            const price = difficulty === 'high' ? randomInt(120, 450) : randomInt(25, 95); // 2d or 3d
+            
+            if (Math.random() > 0.5) {
+                q = `學校旅行，每位同學需付車費 $${price}。${count} 位同學共需付多少元？`;
+                hint = `單價($${price}) × 人數(${count})。`;
+            } else {
+                q = `小明每個月儲蓄 $${price}，${count} 個月後他共儲蓄了多少元？`;
+                hint = `每個月存一樣的錢，用乘法計算總額。`;
+            }
+            a = price * count;
+            subType = 'app_mul';
+            signature = `app-mul-${price}-${count}`;
 
-      // -- Existing Types (Removed Mixed) --
-      else if (chosenType === 'shopping') {
-          const count = randomInt(8, 18);
-          const price = randomInt(50, 150);
-          q = `學校訂購了 ${count} ${item.unit}${item.name}，每${item.unit}價值 $${price}。學校共需支付多少元？`;
-          a = price * count;
-          hint = `數字較大，請小心用直式乘法：$${price} × ${count}`;
-          signature = `high-shop-${price}-${count}`;
-          category = 'mul';
-
-      } else if (chosenType === 'change') {
-          const wallet = randomInt(5, 10) * 100;
-          const count = randomInt(3, 6);
-          const price = randomInt(45, 85);
-          const cost = price * count;
-          if (cost >= wallet) {
-             q = `爸爸想買 ${count} ${item.unit}${item.name} (每${item.unit} $${price})，需付多少元？`;
-             a = cost;
-             hint = `總價 = 單價 × 數量。`;
-          } else {
-             q = `爸爸有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。應找回多少元？`;
-             a = wallet - cost;
-             hint = `找贖：$${wallet} - ($${price} × ${count})`;
-          }
-          signature = `high-change-${wallet}-${price}-${count}`;
-          category = 'logic';
-
-      } else if (chosenType === 'savings') {
-          const weeks = randomInt(6, 15);
-          const weeklySaving = randomInt(80, 250);
-          q = `小明每星期儲蓄 $${weeklySaving}，${weeks} 星期後他共儲蓄了多少元？`;
-          a = weeklySaving * weeks;
-          hint = `乘法應用題：$${weeklySaving} × ${weeks}`;
-          signature = `high-save-${weeklySaving}-${weeks}`;
-          category = 'mul';
-      }
-
-      else if (chosenType === 'length') {
-          const len = randomInt(25, 85); 
-          const count = randomInt(5, 12);
-          q = `一條絲帶長 ${len} 厘米，老師買了 ${count} 條，共有多少厘米？`;
-          a = len * count;
-          hint = `總長度 = 每條長度 × 數量。`;
-          signature = `high-len-${len}-${count}`;
-          category = 'app';
-
-      } else if (chosenType === 'weight') {
-          const weight = randomInt(150, 450); 
-          const count = randomInt(4, 8);
-          q = `一個蘋果重 ${weight} 克，${count} 個蘋果共重多少克？`;
-          a = weight * count;
-          hint = `總重量 = 單個重量 × 數量。`;
-          signature = `high-wgt-${weight}-${count}`;
-          category = 'app';
-
-      } else if (chosenType === 'general_mul') {
-          const shelves = randomInt(5, 12);
-          const booksPerShelf = randomInt(40, 95);
-          q = `圖書館有 ${shelves} 個書架，每個書架放了 ${booksPerShelf} 本書，共有書多少本？`;
-          a = booksPerShelf * shelves;
-          hint = `乘法：${booksPerShelf} × ${shelves}`;
-          signature = `high-gen-mul-${booksPerShelf}-${shelves}`;
-          category = 'mul';
-
-      } else if (chosenType === 'general_div') {
-          const totalItems = randomInt(20, 80) * 5; 
-          const boxes = 5;
-          q = `工廠生產了 ${totalItems} 塊餅乾，平均裝入 ${boxes} 個罐子，每罐有多少塊？`;
-          a = totalItems / boxes;
-          hint = `「平均裝入」是除法題目。`;
-          signature = `high-gen-div-${totalItems}-${boxes}`;
-          category = 'div';
-
-      } else if (chosenType === 'leftover') {
-          const start = randomInt(200, 500);
-          const deduct = randomInt(15, 45);
-          const count = randomInt(4, 8);
-          q = `水桶裡有 ${start} 毫升水，倒出了 ${count} 杯，每杯 ${deduct} 毫升。水桶裡還剩下多少毫升水？`;
-          a = start - (deduct * count);
-          hint = `先算倒出了多少 (${deduct} × ${count})，再用 ${start} 減去它。`;
-          signature = `high-leftover-${start}-${deduct}-${count}`;
-          category = 'logic';
-      }
+        } else if (op === 'div') {
+            // Division Application (Sharing / Average)
+            const divisor = randomInt(3, 8); // 1-digit
+            // Quotient can be 1 or 2 digits
+            const quotient = difficulty === 'high' ? randomInt(12, 120) : randomInt(10, 50);
+            const dividend = divisor * quotient; // 2d or 3d
+            
+            if (Math.random() > 0.5) {
+                q = `老師有 ${dividend} 粒糖果，平均分給 ${divisor} 位同學，每人可得多少粒？`;
+                hint = `關鍵字是「平均分」，這代表要用除法 (${dividend} ÷ ${divisor})。`;
+            } else {
+                q = `農夫收成了 ${dividend} 公斤水果，每 ${divisor} 公斤裝成一箱，可裝成多少箱？`;
+                hint = `總重量 (${dividend}) 除以 每箱重量 (${divisor})。`;
+            }
+            a = quotient;
+            subType = 'app_div';
+            signature = `app-div-${dividend}-${divisor}`;
+        }
     }
+
+    // Assign Score based on difficulty
+    if (difficulty === 'low') { score = 5; penalty = 2; }
+    else if (difficulty === 'mid') { score = 10; penalty = 5; }
+    else { score = 20; penalty = 10; }
 
   } while (signature === lastQSignature && attempts < 10); 
 
@@ -1003,7 +835,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.9</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v7.0</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
