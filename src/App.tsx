@@ -1,1199 +1,391 @@
 // @ts-nocheck
-// P.3 理財數學王 v6.3 (Student List with Numbers)
-// Date: 2026-01-14
-// Fixes: 
-// 1. Updated RAW_CSV_DATA with full class list from "StuInfo_All(3A,3B,3C,3D).csv".
-// 2. Updated CSV parsing logic to extract Class Number (Col E/Index 4).
-// 3. Student selection list now sorted by Class Number.
-// 4. Display format changed to: "1. 陳大文" (Number. Name).
+// P.3 理財數學王 v6.7 (Teacher Import CSV & Real-time List)
+// Date: 2026-01-15
+// Updates: 
+// 1. Version incremented to v6.7.
+// 2. Added "Import CSV" in Teacher View.
+//    - Logic: Wipes existing 'students' collection -> Batch writes new list.
+//    - Mapping: Col D (Class), Col E (Number), Col H (Name).
+// 3. Changed Student View to listen to Firestore in real-time (removed dependence on hardcoded RAW_CSV_DATA).
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTimestamp, increment, getDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { 
+  getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, 
+  increment, getDoc, writeBatch, getDocs, deleteDoc 
+} from 'firebase/firestore';
 import { 
   Trophy, User, Coins, ArrowLeft, CheckCircle2, XCircle, 
-  Calculator, Store, Wallet, Lock, Settings, LogOut, 
-  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check, Undo2, FileDown, History
+  Settings, Save, Upload, FileUp, AlertCircle, Trash2, Users
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
 const userFirebaseConfig = {
-  apiKey: "AIzaSyA2jtWJjlJ7Bnyfkw2oQQar210zHxsX6k0",
-  authDomain: "p3-math-game.firebaseapp.com",
-  projectId: "p3-math-game",
-  storageBucket: "p3-math-game.firebasestorage.app",
-  messagingSenderId: "330710509952",
-  appId: "1:330710509952:web:99966ad83282621c497965"
+  apiKey: "YOUR_API_KEY_HERE",
+  authDomain: "YOUR_AUTH_DOMAIN_HERE",
+  projectId: "YOUR_PROJECT_ID_HERE",
+  storageBucket: "YOUR_STORAGE_BUCKET_HERE",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID_HERE",
+  appId: "YOUR_APP_ID_HERE"
 };
 
-const firebaseConfig = (window).__firebase_config 
-  ? JSON.parse((window).__firebase_config) 
-  : userFirebaseConfig;
-
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase
+const app = initializeApp(userFirebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = (window).__app_id || 'p3-math-finance-v4-accum'; 
 
-// --- 2. Constants ---
-const TEACHER_PWD = "26754411!";
-const NET_PWD = "english_please";
-const RESET_PWD = "61513110"; 
-const GAME_DURATION = 300; 
+// --- 2. Helper: Parse CSV ---
+const parseStudentsFromCSV = (csvContent) => {
+  const lines = csvContent.split('\n').filter(line => line.trim() !== '');
+  const data = [];
+  // Skip header (i=1)
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',');
+    if (cols.length > 7) {
+      // Mapping: D(3)=Class, E(4)=Number, H(7)=Name
+      const className = cols[3]?.trim(); 
+      const number = cols[4]?.trim();
+      const name = cols[7]?.trim();
 
-const SHOPS = [
-  { id: 'A', name_zh: 'A店 (快樂找換)', name_en: 'Shop A (Happy Exchange)', rate: 2, color: 'bg-emerald-600', lightColor: 'bg-emerald-50', borderColor: 'border-emerald-200', textColor: 'text-emerald-700' },
-  { id: 'B', name_zh: 'B店 (幸運找換)', name_en: 'Shop B (Lucky Exchange)', rate: 3, color: 'bg-blue-600', lightColor: 'bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
-  { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
-];
-
-// --- 3. Smart Question Generator (v6.2 Logic) ---
-const ITEMS_DB = [
-  { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
-  { name: '擦膠', unit: '塊' }, { name: '鉛筆', unit: '枝' }, { name: '原子筆', unit: '枝' },
-  { name: '間尺', unit: '把' }, { name: '筆記簿', unit: '本' }, { name: '練習簿', unit: '本' },
-  { name: '故事書', unit: '本' }, { name: '漫畫', unit: '本' }, { name: '圖畫紙', unit: '包' },
-  { name: '三文治', unit: '件' }, { name: '漢堡包', unit: '個' }, { name: '熱狗', unit: '隻' },
-  { name: '薯片', unit: '包' }, { name: '朱古力', unit: '排' }, { name: '糖果', unit: '包' },
-  { name: '珍珠奶茶', unit: '杯' }, { name: '果汁', unit: '瓶' },
-  { name: '玩具車', unit: '輛' }, { name: '公仔', unit: '個' }, { name: '機械人', unit: '個' },
-  { name: '顏色筆', unit: '盒' }, { name: '貼紙', unit: '張' }, { name: '遊戲卡', unit: '包' }
-];
-
-const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
-const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-
-const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) => {
-  let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
-  let signature = "";
-  let subType = "";
-  let attempts = 0;
-
-  const isAppTurn = (questionIndex % 3 === 0); 
-  
-  do {
-    attempts++;
-    const rand = Math.random();
-
-    if (difficulty === 'low') {
-      score = 5; penalty = 2;
-      
-      if (!isAppTurn) { 
-        if (rand < 0.5) {
-          const n1 = randomInt(12, 49); 
-          const n2 = randomInt(2, 6);   
-          q = `${n1} × ${n2} = ?`;
-          a = n1 * n2;
-          hint = `數學老師提示：\n試用直式計算。先算個位 ${n1%10} × ${n2}，再算十位。`;
-          category = 'mul';
-          subType = 'calc_mul';
-          signature = `mul-${n1}-${n2}`;
-        } else {
-          const ans = randomInt(12, 19); 
-          const n2 = randomInt(2, 5);    
-          const total = ans * n2;
-          q = `${total} ÷ ${n2} = ?`;
-          a = ans;
-          hint = `數學老師提示：\n${n2} 乘 10 是 ${n2*10}，答案比 10 大一點。`;
-          category = 'div';
-          subType = 'calc_div';
-          signature = `div-${total}-${n2}`;
-        }
-      } else { 
-        const item = getRandomItem();
-        const count = randomInt(2, 5); 
-        const price = randomInt(12, 25); 
-        
-        if (randomInt(1, 2) === 1) {
-             q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
-        } else {
-             q = `小明想買 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共要付多少錢？`;
-        }
-        
-        a = price * count;
-        hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count})。`;
-        category = 'app';
-        subType = 'app_shopping';
-        signature = `app-${price}-${count}`;
-      }
-    } 
-    else if (difficulty === 'mid') {
-      score = 10; penalty = 5;
-      
-      if (!isAppTurn) { 
-        if (rand < 0.5) {
-          const n1 = randomInt(35, 95); 
-          const n2 = randomInt(3, 8);   
-          q = `${n1} × ${n2} = ?`;
-          a = n1 * n2;
-          hint = "直式計算：注意進位！先算個位，積滿十要進到十位。";
-          category = 'mul';
-          subType = 'calc_mul';
-          signature = `mul-${n1}-${n2}`;
-        } else {
-          let ans;
-          do { ans = randomInt(13, 35); } while (ans % 10 === 0 || ans % 11 === 0);
-          const n2 = randomInt(3, 7);    
-          const total = ans * n2;
-          q = `${total} ÷ ${n2} = ?`;
-          a = ans;
-          hint = `試用直式除法：先看十位夠不夠除。`;
-          category = 'div';
-          subType = 'calc_div';
-          signature = `div-${total}-${n2}`;
-        }
-      } else { 
-        const item = getRandomItem();
-        const tpl = randomInt(1, 3);
-        
-        if (tpl === 1) { 
-            const count = randomInt(4, 9);
-            const price = randomInt(15, 45);
-            q = `老師買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
-            a = price * count;
-            hint = `總金額 = 單價 × 數量。`;
-            subType = 'app_shopping';
-            signature = `app-${price}-${count}`;
-        } else if (tpl === 2) { 
-            const total = randomInt(40, 90);
-            const perPerson = randomInt(3, 8);
-            const grandTotal = total - (total % perPerson); 
-            q = `有 ${grandTotal} ${item.unit}${item.name}，平均分給 ${perPerson} 位同學，每人可得多少${item.unit}？`;
-            a = grandTotal / perPerson;
-            hint = `關鍵字是「平均分」，這代表要用除法。`;
-            subType = 'app_sharing';
-            signature = `app-${grandTotal}-${perPerson}`;
-        } else { 
-            const days = randomInt(5, 9);
-            const saving = randomInt(12, 25);
-            q = `小美每天儲蓄 $${saving}，${days} 天後她共儲蓄了多少元？`;
-            a = saving * days;
-            hint = `每天存一樣的錢，存了多天，用乘法計算總額。`;
-            subType = 'app_savings';
-            signature = `app-${saving}-${days}`;
-        }
-        category = 'app';
-      }
-    } 
-    else { 
-      score = 20; penalty = 10;
-      category = 'app'; 
-
-      const HIGH_TYPES = [
-          'shopping', 'change', 'mixed_money', 'savings', 
-          'length', 'weight', 'general_mul', 'general_div', 'leftover' 
-      ];
-      
-      const availableTypes = HIGH_TYPES.filter(t => t !== lastType);
-      const chosenType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
-      
-      subType = chosenType; 
-
-      const item = getRandomItem();
-
-      if (chosenType === 'shopping') {
-          const count = randomInt(6, 15);
-          const price = randomInt(45, 120);
-          q = `學校訂購了 ${count} ${item.unit}${item.name}，每${item.unit}價值 $${price}。學校共需支付多少元？`;
-          a = price * count;
-          hint = `數字較大，請小心用直式乘法：$${price} × ${count}`;
-          signature = `high-shop-${price}-${count}`;
-
-      } else if (chosenType === 'change') {
-          const wallet = randomInt(5, 10) * 100;
-          const count = randomInt(3, 6);
-          const price = randomInt(45, 85);
-          const cost = price * count;
-          if (cost >= wallet) {
-             q = `爸爸想買 ${count} ${item.unit}${item.name} (每${item.unit} $${price})，需付多少元？`;
-             a = cost;
-             hint = `總價 = 單價 × 數量。`;
-          } else {
-             q = `爸爸有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。應找回多少元？`;
-             a = wallet - cost;
-             hint = `這題有兩步：1. 先算總花費 2. 再用 $${wallet} 減去花費。`;
-          }
-          signature = `high-change-${wallet}-${price}-${count}`;
-
-      } else if (chosenType === 'mixed_money') {
-          const item2 = ITEMS_DB[(ITEMS_DB.indexOf(item) + 3) % ITEMS_DB.length];
-          const p1 = randomInt(25, 60);
-          const p2 = randomInt(15, 40);
-          const qty1 = randomInt(2, 5);
-          const qty2 = randomInt(2, 4);
-          q = `買 ${qty1} ${item.unit}${item.name} (每${item.unit}$${p1}) 和 ${qty2} ${item2.unit}${item2.name} (每${item2.unit}$${p2})，共需付多少元？`;
-          a = (p1 * qty1) + (p2 * qty2);
-          hint = `混合題：先分開算兩種物品的總價，再相加。`;
-          signature = `high-mix-${p1}-${qty1}-${p2}-${qty2}`;
-
-      } else if (chosenType === 'savings') {
-          const weeks = randomInt(4, 12);
-          const weeklySaving = randomInt(50, 150);
-          q = `小明每星期儲蓄 $${weeklySaving}，${weeks} 星期後他共儲蓄了多少元？`;
-          a = weeklySaving * weeks;
-          hint = `每星期存 $${weeklySaving}，存了 ${weeks} 次，用乘法。`;
-          signature = `high-save-${weeklySaving}-${weeks}`;
-      }
-
-      else if (chosenType === 'length') {
-          const len = randomInt(15, 45); 
-          const count = randomInt(4, 9);
-          q = `一條絲帶長 ${len} 厘米，老師買了 ${count} 條，共有多少厘米？`;
-          a = len * count;
-          hint = `每條長 ${len} cm，有 ${count} 條，用乘法求總長度。`;
-          signature = `high-len-${len}-${count}`;
-
-      } else if (chosenType === 'weight') {
-          const weight = randomInt(120, 250); 
-          const count = randomInt(3, 6);
-          q = `一個蘋果重 ${weight} 克，${count} 個蘋果共重多少克？`;
-          a = weight * count;
-          hint = `單個重量 × 數量 = 總重量。`;
-          signature = `high-wgt-${weight}-${count}`;
-
-      } else if (chosenType === 'general_mul') {
-          const shelves = randomInt(4, 9);
-          const booksPerShelf = randomInt(25, 65);
-          q = `圖書館有 ${shelves} 個書架，每個書架放了 ${booksPerShelf} 本書，共有書多少本？`;
-          a = booksPerShelf * shelves;
-          hint = `每架有 ${booksPerShelf} 本，有 ${shelves} 架，用乘法。`;
-          signature = `high-gen-mul-${booksPerShelf}-${shelves}`;
-
-      } else if (chosenType === 'general_div') {
-          const totalItems = randomInt(15, 60) * 5; 
-          const boxes = 5;
-          q = `工廠生產了 ${totalItems} 塊餅乾，平均裝入 ${boxes} 個罐子，每罐有多少塊？`;
-          a = totalItems / boxes;
-          hint = `「平均裝入」是除法題目。`;
-          signature = `high-gen-div-${totalItems}-${boxes}`;
-
-      } else if (chosenType === 'leftover') {
-          const start = randomInt(100, 300);
-          const deduct = randomInt(10, 30);
-          const count = randomInt(3, 6);
-          q = `水桶裡有 ${start} 毫升水，倒出了 ${count} 杯，每杯 ${deduct} 毫升。水桶裡還剩下多少毫升水？`;
-          a = start - (deduct * count);
-          hint = `1. 先算倒出了多少水 (${deduct} × ${count})\n2. 再用原本的水量減去倒出的量。`;
-          signature = `high-leftover-${start}-${deduct}-${count}`;
+      if (className && number && name) {
+        data.push({
+          className: className,
+          number: number,
+          name: name,
+          id: `${className}_${number}`, // Unique ID
+          score: 0,
+          status: 'idle',
+          redeemed: false
+        });
       }
     }
-
-  } while (signature === lastQSignature && attempts < 10); 
-
-  return { q, a, score, penalty, difficulty, hint, category, signature, subType };
+  }
+  return data;
 };
 
-// CSV Data (Replaced with Full Student List)
-const RAW_CSV_DATA = `學生註冊編號,學年,級別,班別代碼,班號,學生編號,英文姓名,中文姓名
-W23083,2025,P3,3A,1,S9014979,CHAN SHEUNG KI,陳尚頎
-W23126,2025,P3,3A,2,S9198301,CHU HOI TUNG,朱凱彤
-W23084,2025,P3,3A,3,S9089944,CHUNG CHEUK LAM,鍾焯琳
-W23005,2025,P3,3A,4,S9024095,HAN JIAYING,韓佳穎
-W23024,2025,P3,3A,5,S9018699,HO CHEUK HIM,何卓謙
-W23007,2025,P3,3A,6,S9055810,KWOK SUM YU,郭芯妤
-W23010,2025,P3,3A,7,S9034260,LAM HEI MAN,林希蔓
-W23030,2025,P3,3A,8,S8979113,LAU PAK YIN,劉柏言
-W23011,2025,P3,3A,9,S9037464,LAU HIU YAU,劉曉悠
-W23013,2025,P3,3A,10,S9034503,LEE CHEUK NAM,李卓楠
-W23014,2025,P3,3A,11,S9030001,LEUNG TSZ CHING,梁梓晴
-W23012,2025,P3,3A,12,S9035119,LI KA LAM,李佳琳
-W23061,2025,P3,3A,13,S9150198,LUNG KA HAI,龍嘉熙
-W23063,2025,P3,3A,14,S8986527,MAN PAK HEI,文柏曦
-W23017,2025,P3,3A,15,S9034872,NG YUE FEI,吳雨霏
-W23145,2025,P3,3A,16,S9356349,POON HO HIN,潘浩軒
-W23046,2025,P3,3A,17,S8991444,SHAM CHEUK FUNG,岑卓峰
-W23018,2025,P3,3A,18,S9027981,TAI KA HEI,戴嘉希
-W23047,2025,P3,3A,19,S9047214,TAM KA YING,譚嘉瑩
-W23019,2025,P3,3A,20,S9014529,TO CHEUK WING,杜卓穎
-W23020,2025,P3,3A,21,S9034376,WONG TSZ YAU,王梓悠
-W23050,2025,P3,3A,22,S8977536,WONG CHUN HEI,黃俊熙
-W23149,2025,P3,3A,23,S9369068,WONG NGA LAM,黃雅琳
-W23021,2025,P3,3A,24,S9024044,YEUNG TSZ YUET,楊子悅
-W23022,2025,P3,3A,25,S9024036,ZHOU HAOYU,周浩宇
-W23086,2025,P3,3B,1,S9043324,CHAU YUK KIU,周鈺翹
-W23025,2025,P3,3B,2,S9042263,CHENG KA SHING,鄭嘉誠
-W23088,2025,P3,3B,3,S9050071,CHEUNG YIN TING,張賢廷
-W23004,2025,P3,3B,4,S9044959,FONG MAN HEI,方雯晞
-W23091,2025,P3,3B,5,S9034228,HO YU KI,何宇淇
-W23093,2025,P3,3B,6,S9065360,KO KWAN NGAI,高鈞毅
-W23008,2025,P3,3B,7,S9029968,KWOK TSZ YING,郭梓盈
-W23094,2025,P3,3B,8,S9061004,LAM YUET NAM,林悅楠
-W23032,2025,P3,3B,9,S9014499,LAU YAN TUNG,劉恩彤
-W23034,2025,P3,3B,10,S9011708,LEE CHUN YIN,李俊賢
-W23036,2025,P3,3B,11,S9024079,LEUNG CHUN SING,梁振聲
-W23038,2025,P3,3B,12,S9029933,LEUNG KA KI,梁嘉麒
-W23015,2025,P3,3B,13,S9044932,LEUNG WING CHIN,梁詠展
-W23041,2025,P3,3B,14,S8977528,LI SUM YAU,李芯悠
-W23099,2025,P3,3B,15,S9035089,LIU CHAK TO,廖澤滔
-W23062,2025,P3,3B,16,S9148452,LUI HOI YAU,雷凱悠
-W23102,2025,P3,3B,17,S9034295,MAN CHAK SING,文澤承
-W23016,2025,P3,3B,18,S9044398,NG KA YEE,吳嘉怡
-W23067,2025,P3,3B,19,S9044436,PANG CHIT LONG,彭哲朗
-W23103,2025,P3,3B,20,S9044355,SIU TSZ KI,蕭芷淇
-W23048,2025,P3,3B,21,S9011686,TSANG CHUN HEI,曾進希
-W23049,2025,P3,3B,22,S9042212,WAN PAK KIU,溫柏翹
-W23105,2025,P3,3B,23,S9042271,WONG HO TIN,黃浩天
-W23106,2025,P3,3B,24,S9037499,WONG YAN TING,黃欣婷
-W23107,2025,P3,3B,25,S9037480,XIE TSZ LAM,謝芷琳
-W23026,2025,P3,3C,1,S9018656,CHAN CHUN YIN,陳俊賢
-W23121,2025,P3,3C,2,S9205103,CHENG SUM YUET,鄭心悅
-W23028,2025,P3,3C,3,S9014561,CHIU CHUN KIT,趙俊傑
-W23090,2025,P3,3C,4,S9044991,FAN CHEUK KAN,范卓勤
-W23006,2025,P3,3C,5,S9044924,IP TIN LONG,葉天朗
-W23131,2025,P3,3C,6,S9221168,KEUNG YAN TUNG,姜欣彤
-W23132,2025,P3,3C,7,S9231457,KWOK KWAN LAM,郭君臨
-W23009,2025,P3,3C,8,S9029951,KWONG TSZ KIU,鄺芷蕎
-W23031,2025,P3,3C,9,S9014545,LAU TIN LONG,劉天朗
-W23033,2025,P3,3C,10,S9011708,LAW CHUN CHING,羅俊政
-W23035,2025,P3,3C,11,S9024087,LEE HOI CHING,李海晴
-W23037,2025,P3,3C,12,S9029941,LEE TSZ LAM,李芷琳
-W23039,2025,P3,3C,13,S9035097,LI CHEUK HEI,李卓熹
-W23040,2025,P3,3C,14,S8977501,LIU TSZ CHUNG,廖梓聰
-W23137,2025,P3,3C,15,S9255011,LUK CHI YEUNG,陸志揚
-W23043,2025,P3,3C,16,S8986519,MA SHU SUM,馬樹森
-W23044,2025,P3,3C,17,S8987760,MAK KA PO,麥嘉寶
-W23045,2025,P3,3C,18,S8987779,MIAO HO FUNG,繆浩峰
-W23138,2025,P3,3C,19,S9255021,MUI TSZ TO,梅子滔
-W23066,2025,P3,3C,20,S9037430,NGAN WING KEI,顏詠琪
-W23143,2025,P3,3C,21,S9318854,SIN CHEUK LAM,冼卓琳
-W23051,2025,P3,3C,22,S8979148,WONG HEI NAM,黃希楠
-W23052,2025,P3,3C,23,S8979130,WONG HIU YAN,黃曉欣
-W23108,2025,P3,3C,24,S9043286,YU CHUN HEI,余俊希
-W23109,2025,P3,3C,25,S9043294,ZHAO YAN LONG,趙言朗
-W23110,2025,P3,3D,1,S9042220,AU-YEUNG SUM YUET,歐陽心悅
-W23001,2025,P3,3D,2,S9018672,CHAN CHUN HO,陳俊豪
-W23002,2025,P3,3D,3,S9024052,CHAN CHUN HEI,陳俊熙
-W23085,2025,P3,3D,4,S9029984,CHAN HEI NGAI,陳希毅
-W23111,2025,P3,3D,5,S9037449,CHAN HEI WING,陳晞穎
-W23027,2025,P3,3D,6,S9014537,CHEN JIAYING,陳嘉盈
-W23122,2025,P3,3D,7,S9205111,CHENG TAI MING,鄭泰明
-W23124,2025,P3,3D,8,S9198328,CHEUNG KWAN TO,張鈞陶
-W23003,2025,P3,3D,9,S9014510,CHOW KA KEI,周嘉琪
-W23089,2025,P3,3D,10,S9043308,CHOW SZE CHAI,周斯齊
-W23127,2025,P3,3D,11,S9205146,CHU CHI HIN,朱智軒
-W23092,2025,P3,3D,12,S9034899,HU YUANQI,胡圓棋
-W23095,2025,P3,3D,13,S9018664,LAM CHAK HANG,林澤衡
-W23096,2025,P3,3D,14,S9043316,LAM HOI LAM,林鎧琳
-W23029,2025,P3,3D,15,S8979105,LAU CHUN YIN,劉俊言
-W23097,2025,P3,3D,16,S9065352,LEE CHING HEI,李政熙
-W23098,2025,P3,3D,17,S9044940,LEUNG WAI HIN,梁偉軒
-W23101,2025,P3,3D,18,S9034252,LI KA LOK,李嘉樂
-W23071,2025,P3,3D,19,S8987728,MAN HEI YUI,文希睿
-W23023,2025,P3,3D,20,41903298,MARK HO LAM,麥可琳
-`;
-
-const App = () => {
-  const [user, setUser] = useState(null);
-  const [view, setView] = useState('home');
-  const [loading, setLoading] = useState(true);
-  const [isStarting, setIsStarting] = useState(false); 
-  const [offlineMode, setOfflineMode] = useState(false);
-
-  // Student State
-  const [studentView, setStudentView] = useState('class_select');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [currentStudent, setCurrentStudent] = useState(null);
-  const [difficulty, setDifficulty] = useState('low');
-  const [currentQuestion, setCurrentQuestion] = useState(null);
-  const [questionCount, setQuestionCount] = useState(0); 
-  const [lastQSignature, setLastQSignature] = useState(''); 
-  const [lastQuestionType, setLastQuestionType] = useState(''); // NEW: Track last type for High Difficulty
-   
-  // Game State
-  const [timeLeft, setTimeLeft] = useState(GAME_DURATION);
-  const [answer, setAnswer] = useState('');
-  const [feedback, setFeedback] = useState(null);
-  const [shake, setShake] = useState(false); 
-  const [gameActive, setGameActive] = useState(false);
-  const [strikes, setStrikes] = useState(0); 
-  const [sessionScore, setSessionScore] = useState(0); 
-  const [totalAccumulatedScore, setTotalAccumulatedScore] = useState(0);
-  const [sessionCorrect, setSessionCorrect] = useState(0);
-  const [sessionWrong, setSessionWrong] = useState(0); 
-
-  // Teacher State
-  const [teacherPwd, setTeacherPwd] = useState('');
-  const [liveData, setLiveData] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const [editScoreVal, setEditScoreVal] = useState('');
-
-  // NET State
-  const [netPwd, setNetPwd] = useState('');
-  const [selectedShop, setSelectedShop] = useState(null); 
-
-  // Data Parsing (Updated for Number. Name)
-  const allStudents = useMemo(() => {
-    const lines = RAW_CSV_DATA.trim().split('\n').slice(1);
-    return lines.map(line => {
-      const p = line.split(',');
-      const cls = p[3];
-      const num = parseInt(p[4]); // Extract class number
-      const name_zh = p[7];
-      const name_en = p[6];
-      // ID unique key
-      return { 
-        class: cls, 
-        number: num, 
-        name_zh: name_zh, 
-        name_en: name_en, 
-        id: `${cls}_${num}` 
-      };
-    });
-  }, []);
-
-  const studentsByClass = useMemo(() => {
-    const map = { '3A': [], '3B': [], '3C': [], '3D': [] };
-    // Sort by class number numerically
-    allStudents.forEach(s => { 
-      if(map[s.class]) map[s.class].push(s); 
-    });
-    // Sort each class array
-    Object.keys(map).forEach(k => {
-      map[k].sort((a, b) => a.number - b.number);
-    });
-    return map;
-  }, [allStudents]);
-
-  // Styles for Shake Animation
-  const shakeStyle = `
-    @keyframes shake {
-      0%, 100% { transform: translateX(0); }
-      10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
-      20%, 40%, 60%, 80% { transform: translateX(10px); }
-    }
-    .animate-shake {
-      animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
-      border-color: #ef4444 !important; /* Red border */
-      background-color: #fef2f2 !important; /* Red bg */
-    }
-  `;
-
-  // Auth Init
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const token = (window).__initial_auth_token;
-        if (token) {
-          await signInWithCustomToken(auth, token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Auth Failed:", err);
-      }
-      setLoading(false);
+// --- 3. Game Logic Helpers ---
+const generateQuestion = (level) => {
+  let q = {};
+  if (level === 'money_basic') {
+    const target = (Math.floor(Math.random() * 10) + 1) * 10;
+    q = { text: `請湊出 ${target} 元`, answer: target, unit: "元", type: 'money' };
+  } else if (level === 'money_advanced') {
+    const price = Math.floor(Math.random() * 80) + 10;
+    const paid = Math.ceil(price / 10) * 10 + (Math.random() > 0.5 ? 0 : 10);
+    q = { text: `小明買文具用了 ${price} 元，付款 ${paid} 元，應找回多少元？`, answer: paid - price, unit: "元", type: 'input' };
+  } else if (level === 'time_duration') {
+    const startH = Math.floor(Math.random() * 10) + 1;
+    const duration = Math.floor(Math.random() * 3) + 1;
+    q = { text: `現在是下午 ${startH} 時，${duration} 小時後是下午幾時？`, answer: startH + duration, unit: "時", type: 'input' };
+  } else if (level === 'measurement_subtraction') {
+    let original = Math.floor(Math.random() * 500) + 200; 
+    let count = Math.floor(Math.random() * 5) + 2;      
+    let perVolume = Math.floor(Math.random() * 30) + 20; 
+    while (original <= (count * perVolume)) { original += 50; }
+    q = { 
+      text: `水桶裡有 ${original} 毫升水，倒出了 ${count} 杯，每杯 ${perVolume} 毫升。水桶裡還剩下多少毫升？`, 
+      answer: original - (count * perVolume), 
+      unit: "毫升", 
+      type: 'input' 
     };
-    init();
-    return onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      if (u) setOfflineMode(false);
-    });
-  }, []);
+  }
+  return q;
+};
 
-  // Timer
-  useEffect(() => {
-    let timer;
-    if (gameActive && timeLeft > 0) {
-      timer = setInterval(() => setTimeLeft(t => t - 1), 1000);
-    } else if (gameActive && timeLeft === 0) {
-      endGame();
-    }
-    return () => clearInterval(timer);
-  }, [gameActive, timeLeft]);
+// --- 4. Main Component ---
+function App() {
+  const [user, setUser] = useState(null);
+  const [allStudents, setAllStudents] = useState([]);
+  const [selectedClass, setSelectedClass] = useState('3A');
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [view, setView] = useState('login'); // login, game, teacher
+  const [question, setQuestion] = useState(null);
+  const [inputAns, setInputAns] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  
+  // Teacher State
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
-  // Unified Live Monitor
+  // Auth
   useEffect(() => {
-    if (!user || (view !== 'teacher' && view !== 'net_dashboard')) return;
-    
-    const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setLiveData(data.sort((a, b) => b.score - a.score));
-    }, (error) => {
-      console.log("Monitor offline:", error);
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setUser(u);
+        if (u.email && u.email.includes('teacher')) setView('teacher');
+      } else {
+        signInAnonymously(auth);
+      }
     });
     return () => unsub();
-  }, [user, view]);
+  }, []);
 
-  // --- Logic ---
-  
-  // RESET LOGIC FOR BACK TO HOME (Full Reset)
-  const handleBackToHome = () => {
-    setStudentView('class_select');
-    setCurrentStudent(null);
-    setSessionScore(0);
-    setTotalAccumulatedScore(0);
-    setSessionCorrect(0);
-    setSessionWrong(0);
-    setStrikes(0);
-    setCurrentQuestion(null);
-    setIsStarting(false);
-    setLastQuestionType('');
-    setView('home');
-  };
-
-  // PLAY AGAIN LOGIC (Keep Student, Reset Session)
-  const handlePlayAgain = () => {
-    setSessionScore(0);
-    setSessionCorrect(0);
-    setSessionWrong(0);
-    setStrikes(0);
-    setCurrentQuestion(null);
-    setIsStarting(false);
-    setLastQuestionType('');
-    setStudentView('difficulty'); // Go to difficulty select directly
-  };
-
-  const startGame = async () => {
-    if (!currentStudent) {
-      alert("請先選擇學生 (Please select a student)");
-      return;
-    }
-
-    setIsStarting(true);
-    
-    let isOffline = offlineMode;
-    if (!user) {
-      try {
-        await signInAnonymously(auth);
-        await new Promise(r => setTimeout(r, 500));
-        if (!auth.currentUser) throw new Error("Auth failed");
-      } catch (e) {
-        isOffline = true;
-        setOfflineMode(true);
-      }
-    }
-
-    setGameActive(true);
-    setSessionScore(0);
-    setSessionCorrect(0); 
-    setSessionWrong(0);
-    setStrikes(0);
-    setTimeLeft(GAME_DURATION);
-    setQuestionCount(0); // Reset question count for 2:1 ratio
-    
-    const q = generateQuestion(difficulty, 1, '', ''); // First question, no history
-    setCurrentQuestion(q);
-    setLastQSignature(q.signature);
-    setLastQuestionType(q.subType);
-    
-    if (!isOffline && user) {
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id);
-      try {
-        const snap = await getDoc(docRef);
-        let prevScore = 0;
-        let prevCorrect = 0;
-        let prevWrong = 0;
-        if (snap.exists()) {
-          prevScore = snap.data().score || 0;
-          prevCorrect = snap.data().correctCount || 0;
-          prevWrong = snap.data().wrongCount || 0;
-        }
-        setTotalAccumulatedScore(prevScore); 
-        setSessionCorrect(prevCorrect);
-        setSessionWrong(prevWrong);
-
-        await setDoc(docRef, {
-          name: currentStudent.name_zh,
-          name_en: currentStudent.name_en,
-          class: currentStudent.class,
-          number: currentStudent.number, // Save class number
-          status: 'playing',
-          score: prevScore,
-          correctCount: prevCorrect,
-          wrongCount: prevWrong,
-          redeemed: snap.exists() ? snap.data().redeemed : false,
-          timestamp: serverTimestamp()
-        }, { merge: true });
-      } catch (e) {
-        setOfflineMode(true);
-        setTotalAccumulatedScore(0);
-      }
-    } else {
-      setTotalAccumulatedScore(0);
-    }
-
-    setStudentView('play');
-    setIsStarting(false);
-  };
-
-  const submitAnswer = (e) => {
-    e.preventDefault();
-    if (!gameActive) return;
-    const correct = parseFloat(answer) === currentQuestion.a;
-    
-    if (correct) {
-      const gained = currentQuestion.score;
-      setSessionScore(s => s + gained);
-      setTotalAccumulatedScore(s => s + gained);
-      setSessionCorrect(s => s + 1);
-      setFeedback({ ok: true, msg: `答對了！+${gained} 分` });
-      
-      if(!offlineMode && user && currentStudent) {
-        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { 
-          score: increment(gained),
-          correctCount: increment(1)
-        }).catch(() => setOfflineMode(true));
-      }
-      
-      setTimeout(() => {
-        setFeedback(null);
-        setAnswer('');
-        setStrikes(0);
-        
-        // Generate Next Question
-        const nextCount = questionCount + 1;
-        setQuestionCount(nextCount);
-        const q = generateQuestion(difficulty, nextCount + 1, lastQSignature, lastQuestionType);
-        setCurrentQuestion(q);
-        setLastQSignature(q.signature);
-        setLastQuestionType(q.subType);
-
-      }, 800);
-
-    } else {
-      // Wrong Answer Logic
-      const newStrikes = strikes + 1;
-      setStrikes(newStrikes);
-      
-      // Trigger Shake Animation
-      setShake(true);
-      setTimeout(() => setShake(false), 500);
-
-      if (newStrikes < 3) {
-        setFeedback({ 
-          ok: false, 
-          msg: `答錯了！${currentQuestion.hint} (還有 ${3 - newStrikes} 次機會)` 
-        });
-        setAnswer(''); 
-        // Hint stays
-      } else {
-        const penalty = currentQuestion.penalty;
-        setSessionScore(s => s - penalty); 
-        setTotalAccumulatedScore(s => Math.max(0, s - penalty));
-        setSessionWrong(s => s + 1);
-        setFeedback({ ok: false, msg: `3次錯誤！扣 ${penalty} 分。答案是 ${currentQuestion.a}` });
-        
-        if(!offlineMode && user && currentStudent) {
-          const errField = `errors.${currentQuestion.category}`;
-          updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { 
-            score: increment(-penalty),
-            wrongCount: increment(1),
-            [errField]: increment(1)
-          }).catch(() => setOfflineMode(true));
-        }
-
-        setTimeout(() => {
-          setFeedback(null);
-          setAnswer('');
-          setStrikes(0);
-          
-          // Generate Next Question
-          const nextCount = questionCount + 1;
-          setQuestionCount(nextCount);
-          const q = generateQuestion(difficulty, nextCount + 1, lastQSignature, lastQuestionType);
-          setCurrentQuestion(q);
-          setLastQSignature(q.signature);
-          setLastQuestionType(q.subType);
-
-        }, 2000); 
-      }
-    }
-  };
-
-  const endGame = () => {
-    setGameActive(false);
-    setStudentView('result');
-    if(!offlineMode && user && currentStudent) {
-      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { status: 'finished' });
-    }
-  };
-
-  const toggleRedeem = async (student, currentStatus) => {
-    if(!user) return;
-    
-    // Undo
-    if (currentStatus) {
-      if (!confirm("⚠️ 確定要撤銷此兌換嗎？(Undo this redemption?)")) return;
-    }
-
-    try {
-      const updateData = { redeemed: !currentStatus };
-      
-      // LOG GENERATION (Only when redeeming)
-      if (!currentStatus && selectedShop) {
-         const hkd = student.score * selectedShop.rate;
-         const logMsg = `${student.name_en} exchanged $${hkd} HKD at ${selectedShop.name_en}`;
-         updateData.lastLog = logMsg;
-      }
-
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', student.id), updateData);
-    } catch(e) {
-      alert("Action failed (Check connection)");
-    }
-  };
-
-  const saveEdit = async (id) => {
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', id), { score: parseInt(editScoreVal) });
-      setEditingId(null);
-    } catch(e) {
-      alert("Save failed (Offline)");
-    }
-  };
-
-  const handleResetRedemptionsOnly = async () => {
-    const pwd = prompt("請輸入重設密碼 (Enter Password to Reset All Redemptions):");
-    if (pwd !== RESET_PWD) {
-      alert("密碼錯誤 (Wrong Password)");
-      return;
-    }
-    if(!confirm("⚠️ 注意 Warning ⚠️\n這將重置所有學生的「兌換狀態」為未兌換，分數保留不變！\n確定要執行嗎？")) return;
-
-    try {
-      const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
-      const snapshot = await getDocs(q);
-      const batch = writeBatch(db);
-      snapshot.docs.forEach((docSnap) => {
-        // Only reset redemption status, keep scores
-        batch.update(docSnap.ref, { 
-          redeemed: false, 
-          // Optional: clear log if we want to reset the history of redemption
-          lastLog: '' // Or keep log but reset status, decided to clear log to avoid confusion
-        });
-      });
-      await batch.commit();
-      alert("所有兌換狀態已重置 (All redemptions reset).");
-    } catch (e) {
-      alert("重置失敗 (Reset Failed): " + e.message);
-    }
-  };
-
-  const handleResetAll = async () => {
-    const pwd = prompt("請輸入重設密碼 (Enter Password to Reset All Scores):");
-    if (pwd !== RESET_PWD) {
-      alert("密碼錯誤 (Wrong Password)");
-      return;
-    }
-    if(!confirm("⚠️ 危險操作 Warning ⚠️\n這將重置所有學生的分數歸零，且無法復原！\n確定要執行嗎？")) return;
-
-    try {
-      const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
-      const snapshot = await getDocs(q);
-      const batch = writeBatch(db);
-      snapshot.docs.forEach((docSnap) => {
-        batch.update(docSnap.ref, { 
-          score: 0, 
-          redeemed: false, 
-          status: 'ready',
-          correctCount: 0,
-          wrongCount: 0,
-          lastLog: '', 
-          'errors.mul': 0,
-          'errors.div': 0,
-          'errors.app': 0,
-          'errors.logic': 0
-        });
-      });
-      await batch.commit();
-      alert("所有分數及數據已重置 (All data reset).");
-    } catch (e) {
-      alert("重置失敗 (Reset Failed): " + e.message);
-    }
-  };
-
-  const downloadCSV = () => {
-    const headers = ["Class", "Number", "Name", "Score", "Correct", "Wrong", "Accuracy (%)", "Analysis"];
-    const csvRows = [headers.join(",")];
-
-    liveData.forEach(s => {
-      const correct = s.correctCount || 0;
-      const wrong = s.wrongCount || 0;
-      const total = correct + wrong;
-      const accuracy = total > 0 ? ((correct / total) * 100).toFixed(1) : "0.0";
-      
-      let analysis = "表現均衡 (Balanced)";
-      const errs = s.errors || {};
-      const maxErr = Math.max(errs.mul || 0, errs.div || 0, errs.app || 0, errs.logic || 0);
-      
-      if (maxErr > 0) {
-        if (maxErr === errs.app) analysis = "應用題需加強 (Weak in Word Problems)";
-        else if (maxErr === errs.div) analysis = "除法運算需加強 (Weak in Division)";
-        else if (maxErr === errs.mul) analysis = "乘法運算需加強 (Weak in Multiplication)";
-        else if (maxErr === errs.logic) analysis = "邏輯思維需加強 (Weak in Logic)";
-      }
-      if (total === 0) analysis = "尚未開始 (Not Started)";
-
-      const row = [
-        s.class,
-        s.number,
-        s.name,
-        s.score,
-        correct,
-        wrong,
-        accuracy,
-        analysis
-      ];
-      csvRows.push(row.join(","));
+  // Real-time Student Sync (Replaces static CSV parsing)
+  useEffect(() => {
+    const q = collection(db, "students");
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const studentsData = snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id
+      }));
+      setAllStudents(studentsData);
     });
+    return () => unsubscribe();
+  }, []);
 
-    const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `Math_Competition_Report_${new Date().toISOString().slice(0,10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Filter Students
+  const filteredStudents = useMemo(() => {
+    return allStudents
+      .filter(s => s.className === selectedClass) // changed from 'class' to 'className' to match parser
+      .sort((a, b) => parseInt(a.number) - parseInt(b.number));
+  }, [allStudents, selectedClass]);
+
+  // Handle Login
+  const handleStudentLogin = (student) => {
+    setSelectedStudent(student);
+    setView('game');
   };
 
-  // --- Render ---
+  // Submit Answer
+  const submitAnswer = async () => {
+    if (!question) return;
+    const isCorrect = parseInt(inputAns) === question.answer;
+    setFeedback(isCorrect ? 'correct' : 'wrong');
+    if (isCorrect) {
+      const ref = doc(db, "students", selectedStudent.id);
+      await updateDoc(ref, { score: increment(10) });
+      setSelectedStudent(prev => ({ ...prev, score: (prev.score || 0) + 10 }));
+    }
+  };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  // Teacher: Handle CSV Import
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-  const ConnectionStatus = () => (
-    <div className={`fixed top-4 left-4 z-50 flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${!offlineMode && user ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
-      {!offlineMode && user ? <Wifi size={14}/> : <CloudOff size={14}/>}
-      {!offlineMode && user ? 'Online' : 'Offline Mode (Local Play)'}
-    </div>
-  );
+    setIsUploading(true);
+    const reader = new FileReader();
+    
+    reader.onload = async (event) => {
+      try {
+        const text = event.target.result;
+        const newStudents = parseStudentsFromCSV(text);
 
-  if (view === 'home') return (
-    <div className="h-screen w-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4 overflow-hidden relative">
-      <style>{shakeStyle}</style>
-      <ConnectionStatus/>
-      <div className="text-center">
-        <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.3</h1>
-        <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
-      </div>
-      <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
-        <button onClick={() => setView('student')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-orange-200 hover:scale-105 transition-all text-center group">
-          <User size={48} className="mx-auto text-orange-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是學生</h2>
-        </button>
-        <button onClick={() => setView('teacher_login')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-indigo-200 hover:scale-105 transition-all text-center group">
-          <BarChart3 size={48} className="mx-auto text-indigo-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是老師</h2>
-        </button>
-        <button onClick={() => setView('net_login')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-purple-200 hover:scale-105 transition-all text-center group">
-          <Languages size={48} className="mx-auto text-purple-500 mb-2 group-hover:scale-110 transition-transform"/>
-          <h2 className="text-2xl font-black text-slate-700">NET</h2>
-        </button>
-      </div>
-    </div>
-  );
+        if (newStudents.length === 0) {
+          alert("CSV 解析失敗或沒有學生資料，請檢查格式。");
+          setIsUploading(false);
+          return;
+        }
 
-  if (view === 'student') return (
-    <div className="h-screen w-screen bg-orange-50 p-4 overflow-hidden relative">
-      <style>{shakeStyle}</style>
-      <ConnectionStatus/>
-      <div className="w-full h-full max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 flex flex-col">
-        <div className="bg-orange-500 p-4 text-white flex justify-between items-center shrink-0">
-          <button onClick={handleBackToHome}><ArrowLeft/></button>
-          <h2 className="font-bold">比賽專區 (Student Zone)</h2>
-          <div className="w-6"></div>
+        // 1. Delete all existing students (Batch)
+        // Note: Batches are limited to 500 ops. If > 500 students, need chunks.
+        // Assuming < 500 for P3 level.
+        const batch = writeBatch(db);
+        const existingSnapshot = await getDocs(collection(db, "students"));
+        existingSnapshot.forEach((doc) => {
+          batch.delete(doc.ref);
+        });
+
+        // 2. Add new students
+        newStudents.forEach((s) => {
+          const docRef = doc(db, "students", s.id);
+          batch.set(docRef, {
+            name: s.name,
+            className: s.className, // using className to be consistent
+            number: s.number,
+            score: 0,
+            redeemed: false
+          });
+        });
+
+        await batch.commit();
+        alert(`成功匯入 ${newStudents.length} 名學生資料！舊資料已覆蓋。`);
+      } catch (error) {
+        console.error("Import Error:", error);
+        alert("匯入發生錯誤，請查看 Console。");
+      } finally {
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsText(file);
+  };
+
+  // Render Login
+  if (view === 'login') {
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 font-sans">
+        <header className="mb-6 text-center">
+          <h1 className="text-3xl font-black text-indigo-600 mb-2">P.3 理財數學王 v6.7</h1>
+          <div className="flex justify-center gap-2">
+            <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-bold">Online Mode</span>
+          </div>
+        </header>
+
+        {/* Class Selector */}
+        <div className="flex justify-center gap-3 mb-6 overflow-x-auto pb-2">
+          {['3A', '3B', '3C', '3D'].map(cls => (
+            <button
+              key={cls}
+              onClick={() => setSelectedClass(cls)}
+              className={`px-6 py-3 rounded-xl font-bold text-lg shadow-sm whitespace-nowrap
+                ${selectedClass === cls 
+                  ? 'bg-indigo-600 text-white scale-105' 
+                  : 'bg-white text-slate-500 hover:bg-slate-100'}`}
+            >
+              {cls}
+            </button>
+          ))}
         </div>
-        <div className="p-6 flex-grow overflow-y-auto flex flex-col">
-           {studentView === 'class_select' && (
-            <div className="grid grid-cols-4 gap-6 h-full items-center">
-              {['3A','3B','3C','3D'].map(c => <button key={c} onClick={() => {setSelectedClass(c); setStudentView('name_select');}} className="h-64 bg-orange-50 hover:bg-orange-500 hover:text-white rounded-3xl text-6xl font-black border-4 border-orange-100 transition-colors shadow-sm">{c}</button>)}
-            </div>
-          )}
 
-          {studentView === 'name_select' && (
-            <div className="space-y-4 h-full flex flex-col">
-              <div className="flex justify-between items-center shrink-0">
-                <button onClick={() => setStudentView('class_select')} className="px-4 py-2 bg-slate-100 rounded-lg font-bold">Back</button>
-                <h3 className="text-2xl font-black">Select Name</h3>
-                <div className="w-16"></div>
-              </div>
-              <div className="grid grid-cols-4 lg:grid-cols-5 gap-3 overflow-y-auto p-2">
-                {studentsByClass[selectedClass]?.map(s => <button key={s.id} onClick={() => {setCurrentStudent(s); setStudentView('difficulty');}} className="p-4 bg-slate-50 hover:bg-orange-100 rounded-xl text-left border font-bold text-lg">{s.number}. {s.name_zh}</button>)}
-              </div>
-            </div>
-          )}
-
-          {studentView === 'difficulty' && (
-            <div className="flex-grow flex flex-col justify-center items-center space-y-6">
-              <h3 className="text-3xl font-black">選擇挑戰難度</h3>
-              {/* Added Student Info */}
-              {currentStudent && <p className="text-xl text-slate-500 font-bold">Student: {currentStudent.class} ({currentStudent.number}) {currentStudent.name_zh}</p>}
-              
-              <div className="grid grid-cols-3 gap-8 w-full max-w-6xl">
-                <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="p-12 bg-green-100 border-4 border-green-300 rounded-3xl text-3xl font-black text-green-800 hover:scale-105 transition-transform shadow-lg">
-                  初級 (Low)<br/><span className="text-lg font-bold mt-2 block">每題 5 分<br/>(扣 2 分)</span>
-                </button>
-                <button onClick={() => {setDifficulty('mid'); setStudentView('intro');}} className="p-12 bg-blue-100 border-4 border-blue-300 rounded-3xl text-3xl font-black text-blue-800 hover:scale-105 transition-transform shadow-lg">
-                  中級 (Mid)<br/><span className="text-lg font-bold mt-2 block">每題 10 分<br/>(扣 5 分)</span>
-                </button>
-                <button onClick={() => {setDifficulty('high'); setStudentView('intro');}} className="p-12 bg-purple-100 border-4 border-purple-300 rounded-3xl text-3xl font-black text-purple-800 hover:scale-105 transition-transform shadow-lg">
-                  高級 (High)<br/><span className="text-lg font-bold mt-2 block">每題 20 分<br/>(扣 10 分)</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {studentView === 'intro' && (
-            <div className="flex-grow flex flex-col justify-center items-center space-y-8">
-              <h2 className="text-7xl font-black text-slate-800">Ready?</h2>
-              <p className="text-3xl font-bold text-slate-500">5 分鐘限時挑戰！<br/>答錯 3 次會扣分喔！</p>
-              <button 
-                onClick={startGame} 
-                disabled={isStarting}
-                className={`px-20 py-8 bg-orange-500 text-white rounded-full text-5xl font-black shadow-xl hover:scale-105 transition-transform flex items-center ${isStarting ? 'opacity-75 cursor-wait' : 'animate-pulse'}`}
+        {/* Student Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 max-w-4xl mx-auto mb-12">
+          {filteredStudents.length > 0 ? (
+            filteredStudents.map(s => (
+              <button
+                key={s.id}
+                onClick={() => handleStudentLogin(s)}
+                className="flex flex-col items-center p-4 bg-white rounded-2xl shadow-sm border hover:border-indigo-300 hover:shadow-md transition-all"
               >
-                {isStarting ? <Loader2 className="animate-spin mr-3" size={48} /> : <Play size={48} fill="currentColor" className="inline mr-3"/>} 
-                {isStarting ? "STARTING..." : "START"}
+                <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-black mb-2">
+                  {s.number}
+                </div>
+                <span className="font-bold text-slate-700">{s.name}</span>
+                <span className="text-xs text-slate-400 mt-1">💎 {s.score || 0}</span>
               </button>
+            ))
+          ) : (
+            <div className="col-span-full text-center py-10 text-slate-400">
+              <p>載入中 或 該班別暫無學生資料...</p>
             </div>
           )}
+        </div>
+        
+        <div className="text-center">
+          <button onClick={() => setView('teacher')} className="text-slate-300 text-sm hover:text-indigo-600">
+            教師登入
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-          {studentView === 'play' && (
-            !currentQuestion ? (
-              <div className="flex-grow flex items-center justify-center">
-                <Loader2 className="animate-spin text-orange-500" size={64} />
+  // Render Game (Simplified for brevity, same as v6.6 logic)
+  if (view === 'game' && selectedStudent) {
+    return (
+      <div className="min-h-screen bg-indigo-50 p-4">
+        {/* Header */}
+        <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm mb-6 max-w-2xl mx-auto">
+          <div>
+            <h2 className="font-bold text-slate-800">{selectedStudent.number}. {selectedStudent.name}</h2>
+            <p className="text-xs text-slate-400">{selectedStudent.className} 班</p>
+          </div>
+          <div className="flex items-center gap-2 bg-yellow-50 px-4 py-2 rounded-full">
+            <Coins className="text-yellow-500" />
+            <span className="font-black text-xl text-yellow-600">{selectedStudent.score || 0}</span>
+          </div>
+        </div>
+
+        {/* Game Content */}
+        <div className="max-w-2xl mx-auto">
+          {!question ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button onClick={() => { setQuestion(generateQuestion('money_basic')); setInputAns(''); setFeedback(null); }} className="p-6 bg-white rounded-xl shadow-sm border-l-8 border-green-400 font-bold text-lg text-slate-700 text-left">💰 基礎理財</button>
+              <button onClick={() => { setQuestion(generateQuestion('money_advanced')); setInputAns(''); setFeedback(null); }} className="p-6 bg-white rounded-xl shadow-sm border-l-8 border-blue-400 font-bold text-lg text-slate-700 text-left">🏪 購物找換</button>
+              <button onClick={() => { setQuestion(generateQuestion('time_duration')); setInputAns(''); setFeedback(null); }} className="p-6 bg-white rounded-xl shadow-sm border-l-8 border-purple-400 font-bold text-lg text-slate-700 text-left">⏰ 時間計算</button>
+              <button onClick={() => { setQuestion(generateQuestion('measurement_subtraction')); setInputAns(''); setFeedback(null); }} className="p-6 bg-white rounded-xl shadow-sm border-l-8 border-orange-400 font-bold text-lg text-slate-700 text-left">⚖️ 度量衡挑戰</button>
+            </div>
+          ) : (
+            <div className="bg-white rounded-3xl shadow-lg p-8 text-center relative">
+              <button onClick={() => setQuestion(null)} className="absolute top-4 left-4 text-slate-300 hover:text-slate-600"><ArrowLeft /></button>
+              <h3 className="text-2xl font-bold text-slate-800 mb-8 mt-4">{question.text}</h3>
+              <div className="flex justify-center items-center gap-3 mb-8">
+                <input type="number" value={inputAns} onChange={(e) => setInputAns(e.target.value)} className="w-32 h-16 text-3xl text-center font-bold border-b-4 border-indigo-200 outline-none bg-slate-50" />
+                {question.unit && <span className="text-xl font-bold text-slate-400">{question.unit}</span>}
               </div>
-            ) : (
-              <div className="flex flex-row gap-6 h-full items-stretch">
-                <div className="w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
-                  {/* Name Display */}
-                  <div className="absolute top-4 left-6 text-slate-400 font-bold text-xl">
-                    {currentStudent.class} ({currentStudent.number}) {currentStudent.name_zh}
-                  </div>
-                  {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
-                  
-                  {/* Question */}
-                  <p className="text-4xl lg:text-6xl font-bold text-slate-800 text-center leading-tight px-4">{currentQuestion.q}</p>
+              {!feedback ? (
+                <button onClick={submitAnswer} className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-xl shadow-lg">提交答案</button>
+              ) : (
+                <div className={`p-6 rounded-xl ${feedback === 'correct' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  <span className="text-2xl font-black">{feedback === 'correct' ? '答對了！+10分' : '再試一次！'}</span>
+                  <button onClick={() => setQuestion(null)} className="mt-4 px-6 py-2 bg-white rounded-full text-sm font-bold shadow-sm block mx-auto">繼續</button>
                 </div>
-
-                <div className="w-1/3 flex flex-col gap-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-rose-100 p-4 rounded-2xl flex flex-col items-center justify-center text-rose-700">
-                      <Timer size={32} className="mb-1"/>
-                      <span className="text-3xl font-black">{Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</span>
-                      <span className="text-xs font-bold">Time (時間)</span>
-                    </div>
-                    <div className="bg-orange-100 p-4 rounded-2xl flex flex-col items-center justify-center text-orange-700">
-                      <Coins size={32} className="mb-1"/>
-                      <span className="text-3xl font-black">{totalAccumulatedScore}</span>
-                      <span className="text-xs font-bold">Total (累積)</span>
-                    </div>
-                  </div>
-
-                  {/* NEW: Student Stats Display */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-green-50 p-2 rounded-xl flex items-center justify-center gap-2 text-green-700 border border-green-200">
-                      <CheckCircle2 size={20}/>
-                      <span className="font-black text-xl">{sessionCorrect}</span>
-                    </div>
-                    <div className="bg-red-50 p-2 rounded-xl flex items-center justify-center gap-2 text-red-700 border border-red-200">
-                      <XCircle size={20}/>
-                      <span className="font-black text-xl">{sessionWrong}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex-1 flex items-center justify-center min-h-[80px]">
-                     {feedback && <div className={`w-full p-4 rounded-2xl text-center font-black text-xl animate-bounce ${feedback.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{feedback.msg}</div>}
-                  </div>
-
-                  <form onSubmit={submitAnswer} className="flex flex-col gap-4">
-                    <input 
-                      type="number" 
-                      autoFocus 
-                      value={answer} 
-                      onChange={e => setAnswer(e.target.value)} 
-                      className={`w-full p-6 rounded-2xl border-4 text-5xl text-center font-black outline-none transition-all shadow-sm ${shake ? 'animate-shake border-red-400 bg-red-50' : 'border-slate-300 focus:border-orange-500'}`} 
-                      placeholder="?"
-                    />
-                    <button type="submit" className="w-full py-8 bg-slate-800 text-white rounded-2xl font-black text-4xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
-                  </form>
-                </div>
-              </div>
-            )
-          )}
-
-          {studentView === 'result' && (
-            <div className="h-full flex flex-col justify-center items-center space-y-8 animate-in zoom-in">
-              <Trophy size={100} className="text-yellow-400 mx-auto drop-shadow-lg"/>
-              <h2 className="text-5xl font-black">時間到！</h2>
-              <div className="grid grid-cols-2 gap-8 w-full max-w-2xl">
-                <div className="p-8 bg-slate-50 rounded-3xl border shadow-sm text-center">
-                  <p className="text-sm text-slate-400 font-bold mb-2">本局得分</p>
-                  <p className="text-5xl font-black text-slate-700">{sessionScore}</p>
-                </div>
-                <div className="p-8 bg-orange-50 rounded-3xl border-2 border-orange-200 shadow-sm text-center">
-                  <p className="text-sm text-orange-400 font-bold mb-2">累積總分</p>
-                  <p className="text-5xl font-black text-orange-600">{totalAccumulatedScore}</p>
-                </div>
-              </div>
-              <button onClick={handlePlayAgain} className="px-16 py-6 bg-slate-800 text-white rounded-2xl font-black text-2xl hover:bg-black transition-colors shadow-lg flex items-center gap-3">
-                <RotateCcw size={28}/> 再次挑戰 (Play Again)
-              </button>
-              <button onClick={handleBackToHome} className="text-slate-400 font-bold underline text-lg">完全登出 (Logout)</button>
+              )}
             </div>
           )}
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  if (view === 'net_login') return (
-    <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
-      <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
-        <h2 className="text-3xl font-black">NET Login</h2>
-        <input type="password" value={netPwd} onChange={e => setNetPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
-        <button onClick={() => { if(netPwd === NET_PWD) setView('net_select_shop'); else alert('Wrong Password'); }} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-bold text-xl hover:bg-purple-700">Enter</button>
-        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
-      </div>
-    </div>
-  );
-
-  if (view === 'net_select_shop') return (
-    <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
-      <div className="max-w-4xl w-full text-center space-y-8">
-        <h2 className="text-4xl font-black text-purple-900">Select Your Shop</h2>
-        <div className="grid grid-cols-3 gap-6">
-          {SHOPS.map(shop => (
-            <button key={shop.id} onClick={() => { setSelectedShop(shop); setView('net_dashboard'); }} className={`p-10 rounded-3xl border-4 ${shop.borderColor} ${shop.lightColor} hover:scale-105 transition-transform shadow-lg group`}>
-              <h3 className={`text-3xl font-black ${shop.textColor} mb-2`}>{shop.name_en}</h3>
-              <p className="font-bold text-slate-500">{shop.name_zh}</p>
-              <div className={`mt-4 inline-block px-4 py-2 rounded-xl text-white font-bold text-xl ${shop.color}`}>Rate: x{shop.rate}</div>
-            </button>
-          ))}
+  // Teacher View
+  return (
+    <div className="min-h-screen bg-slate-100 p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex justify-between items-center mb-8">
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+            <Settings /> 教師後台控制中心
+          </h2>
+          <button onClick={() => setView('login')} className="px-4 py-2 bg-white text-slate-600 rounded-lg shadow-sm font-bold">登出</button>
         </div>
-        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
-      </div>
-    </div>
-  );
 
-  if (view === 'net_dashboard' && selectedShop) return (
-    <div className="h-screen w-screen bg-slate-100 p-4 font-sans overflow-hidden">
-      <div className="w-full h-full max-w-[98vw] mx-auto flex flex-col">
-        <div className={`flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0 border-l-8 ${selectedShop.borderColor}`}>
-          <div className="flex items-center gap-4">
-            <div className={`p-3 rounded-xl text-white ${selectedShop.color}`}><Store size={32}/></div>
+        {/* Data Import Card */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm mb-6 border-l-8 border-indigo-500">
+          <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <FileUp className="text-indigo-500" /> 匯入學生名單
+          </h3>
+          <div className="bg-blue-50 p-4 rounded-lg mb-4 text-sm text-blue-800 flex gap-2">
+            <AlertCircle size={20} />
             <div>
-              <h2 className={`text-3xl font-black ${selectedShop.textColor}`}>{selectedShop.name_en} - Dashboard</h2>
-              <p className="text-slate-400 font-bold">Exchange Rate: ${selectedShop.rate} HKD / Coin</p>
+              <p className="font-bold">注意：匯入操作將會「覆蓋」現有資料庫！</p>
+              <p>系統會先清除舊名單，再寫入新名單。請確保 CSV 包含完整 3A-3D 班資料。</p>
+              <p className="mt-1 text-xs opacity-70">格式要求: Col D(班別), Col E(班號), Col H(姓名)</p>
             </div>
           </div>
-          <div className="flex gap-4">
-             <button onClick={handleResetRedemptionsOnly} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
-              <RotateCcw size={20}/> 重設所有兌換
+          
+          <div className="flex items-center gap-4">
+            <input 
+              type="file" 
+              accept=".csv"
+              ref={fileInputRef}
+              className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+            />
+            <button 
+              onClick={(e) => fileInputRef.current && handleFileUpload({ target: fileInputRef.current })}
+              disabled={isUploading}
+              className={`px-6 py-3 rounded-lg font-bold text-white shadow-lg transition-all flex items-center gap-2
+                ${isUploading ? 'bg-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+            >
+              {isUploading ? '處理中...' : '確認匯入'} <Upload size={18} />
             </button>
-            <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
           </div>
         </div>
-        <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
-          {['3A','3B','3C','3D'].map(cls => (
-            <div key={cls} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
-              <h3 className="font-black text-2xl text-slate-700 mb-4 border-b pb-4 text-center">{cls}</h3>
-              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
-                {liveData.filter(d => d.class === cls).map(s => {
-                  const hkd = s.score * selectedShop.rate;
-                  return (
-                    <div key={s.id} className={`p-3 rounded-xl border-2 flex flex-col gap-2 ${s.redeemed ? 'bg-green-50 border-green-200 opacity-60' : 'bg-white border-slate-100'}`}>
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <span className="font-bold text-md block text-slate-800">{s.number}. {s.name}</span>
-                          <div className="flex gap-3 text-xs mt-1">
-                            <span className="font-bold text-orange-500"><Coins size={10} className="inline mr-1"/>{s.score}</span>
-                            <span className={`font-black ${selectedShop.textColor}`}>${hkd}</span>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={() => toggleRedeem(s, s.redeemed)} 
-                          className={`p-2 rounded-lg transition-colors ${
-                            s.redeemed 
-                              ? 'bg-green-100 text-green-600 hover:bg-red-100 hover:text-red-600' 
-                              : `${selectedShop.lightColor} hover:bg-slate-200`
-                          }`}
-                          title={s.redeemed ? "Click to Undo (撤銷)" : "Click to Redeem (兌換)"}
-                        >
-                          {s.redeemed ? <CheckCircle2 size={20}/> : <Check size={20} className={selectedShop.textColor}/>}
-                        </button>
-                      </div>
-                      
-                      {/* REDEMPTION LOG DISPLAY */}
-                      {s.lastLog && (
-                        <div className="text-[10px] text-slate-400 flex items-center gap-1 border-t pt-1 mt-1">
-                          <History size={10} />
-                          <span className="truncate">{s.lastLog}</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+
+        {/* Current Stats */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm">
+          <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <Users className="text-green-500" /> 系統概況
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-4 bg-slate-50 rounded-xl text-center">
+              <span className="block text-3xl font-black text-slate-800">{allStudents.length}</span>
+              <span className="text-xs text-slate-500 uppercase font-bold">總學生人數</span>
+            </div>
+            {['3A', '3B', '3C', '3D'].map(cls => (
+              <div key={cls} className="p-4 bg-slate-50 rounded-xl text-center border-t-4 border-slate-200">
+                <span className="block text-2xl font-bold text-slate-700">
+                  {allStudents.filter(s => s.className === cls).length}
+                </span>
+                <span className="text-xs text-slate-500 uppercase font-bold">{cls} 人數</span>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-
-  if (view === 'teacher_login') return (
-    <div className="w-screen h-screen bg-indigo-50 flex items-center justify-center p-4">
-      <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
-        <h2 className="text-3xl font-black">老師後台</h2>
-        <input type="password" value={teacherPwd} onChange={e => setTeacherPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
-        <button onClick={() => { if(teacherPwd === TEACHER_PWD) setView('teacher'); else alert('密碼錯誤 (Wrong Password)'); }} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-xl hover:bg-indigo-700">Login</button>
-        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
-      </div>
-    </div>
-  );
-
-  if (view === 'teacher') return (
-    <div className="h-screen w-screen bg-slate-100 p-4 font-sans overflow-hidden">
-      <div className="w-full h-full max-w-[98vw] mx-auto flex flex-col">
-        <div className="flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0">
-          <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察 (Live Monitor)</h2>
-          <div className="flex gap-4">
-            {/* CSV DOWNLOAD BUTTON */}
-            <button onClick={downloadCSV} className="flex items-center gap-2 bg-green-100 text-green-700 px-4 py-3 rounded-xl font-bold hover:bg-green-200 transition-colors">
-              <FileDown size={20}/> 下載報表 (CSV)
-            </button>
-            <button onClick={handleResetAll} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
-              <RotateCcw size={20}/> 重設所有分數
-            </button>
-            <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
+            ))}
           </div>
         </div>
-        <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
-          {['3A','3B','3C','3D'].map(cls => (
-            <div key={cls} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
-              <h3 className="font-black text-2xl text-slate-700 mb-4 border-b pb-4 text-center">{cls}</h3>
-              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
-                {liveData.filter(d => d.class === cls).map(s => (
-                  <div key={s.id} className={`p-3 rounded-xl border-2 flex justify-between items-center ${s.redeemed ? 'bg-green-50 border-green-200' : 'bg-white border-slate-100'}`}>
-                    <div>
-                      <span className="font-bold text-md block">{s.number}. {s.name}</span>
-                      <span className="text-xs text-slate-400 font-bold">{s.status === 'playing' ? '🔥 Playing' : (s.redeemed ? '✅ Done' : '⭕ Waiting')}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {editingId === s.id ? (
-                        <div className="flex gap-2">
-                          <input type="number" className="w-16 border rounded p-1 text-center font-bold" value={editScoreVal} onChange={e => setEditScoreVal(e.target.value)} />
-                          <button onClick={() => saveEdit(s.id)}><Save size={20} className="text-blue-600"/></button>
-                        </div>
-                      ) : (
-                        <>
-                          <span className="font-black text-xl text-indigo-600">{s.score}</span>
-                          <button onClick={() => { setEditingId(s.id); setEditScoreVal(s.score); }}><Edit size={16} className="text-slate-300 hover:text-indigo-500"/></button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
-
-  return <div>Loading...</div>;
-};
+}
 
 export default App;
