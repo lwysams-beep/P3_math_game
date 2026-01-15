@@ -1,444 +1,1203 @@
 // @ts-nocheck
-// P.3 理財數學王 v6.7 (Layout Restored & CSV Import)
-// Date: 2026-01-15
-// Note: 
-// 1. UI REVERTED to match v6.3 exactly (Landing Page -> Student/Teacher/NET).
-// 2. Fixed "Too Narrow" issue by using max-w-7xl.
-// 3. Added Teacher Import CSV function (Wipes DB -> Batch Write).
-// 4. Student list is now real-time synced with Firestore.
+// P.3 理財數學王 v6.8 (Student List with Numbers)
+// Date: 2026-01-14
+// Fixes: 
+// 1. Updated RAW_CSV_DATA with full class list from "StuInfo_All(3A,3B,3C,3D).csv".
+// 2. Updated CSV parsing logic to extract Class Number (Col E/Index 4).
+// 3. Student selection list now sorted by Class Number.
+// 4. Display format changed to: "1. 陳大文" (Number. Name).
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, serverTimestamp, increment, getDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { 
-  getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, 
-  increment, getDocs, writeBatch, deleteDoc 
-} from 'firebase/firestore';
-import { 
-  Trophy, User, Coins, ArrowLeft, Settings, Save, Upload, 
-  FileUp, AlertCircle, Trash2, Users, LayoutGrid, GraduationCap, Globe
+  Trophy, User, Coins, ArrowLeft, CheckCircle2, XCircle, 
+  Calculator, Store, Wallet, Lock, Settings, LogOut, 
+  Languages, BarChart3, Search, Play, Timer, Save, Edit, RefreshCw, AlertTriangle, Loader2, Wifi, WifiOff, CloudOff, RotateCcw, Check, Undo2, FileDown, History
 } from 'lucide-react';
 
 // --- 1. Firebase Configuration ---
 const userFirebaseConfig = {
-  apiKey: "YOUR_API_KEY_HERE",
-  authDomain: "YOUR_AUTH_DOMAIN_HERE",
-  projectId: "YOUR_PROJECT_ID_HERE",
-  storageBucket: "YOUR_STORAGE_BUCKET_HERE",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID_HERE",
-  appId: "YOUR_APP_ID_HERE"
+  apiKey: "AIzaSyA2jtWJjlJ7Bnyfkw2oQQar210zHxsX6k0",
+  authDomain: "p3-math-game.firebaseapp.com",
+  projectId: "p3-math-game",
+  storageBucket: "p3-math-game.firebasestorage.app",
+  messagingSenderId: "330710509952",
+  appId: "1:330710509952:web:99966ad83282621c497965"
 };
 
-// Initialize Firebase
-const app = initializeApp(userFirebaseConfig);
+const firebaseConfig = (window).__firebase_config 
+  ? JSON.parse((window).__firebase_config) 
+  : userFirebaseConfig;
+
+const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const appId = (window).__app_id || 'p3-math-finance-v4-accum'; 
 
-// --- 2. Helper: Parse CSV ---
-// Logic: Extract Class(Col D/3), Number(Col E/4), Name(Col H/7)
-const parseStudentsFromCSV = (csvContent) => {
-  const lines = csvContent.split('\n').filter(line => line.trim() !== '');
-  const data = [];
-  // Skip header (i=1)
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(',');
-    if (cols.length > 7) {
-      const className = cols[3]?.trim(); 
-      const number = cols[4]?.trim();
-      const name = cols[7]?.trim();
+// --- 2. Constants ---
+const TEACHER_PWD = "26754411!";
+const NET_PWD = "english_please";
+const RESET_PWD = "61513110"; 
+const GAME_DURATION = 300; 
 
-      if (className && number && name) {
-        // Create a sorting ID like "3A_01" for easier ordering later if needed
-        const numPadded = number.padStart(2, '0');
-        data.push({
-          className: className,
-          number: number,
-          name: name,
-          id: `${className}_${number}`, // Unique ID e.g., 3A_1
-          score: 0,
-          redeemed: false
-        });
+const SHOPS = [
+  { id: 'A', name_zh: 'A店 (快樂找換)', name_en: 'Shop A (Happy Exchange)', rate: 2, color: 'bg-emerald-600', lightColor: 'bg-emerald-50', borderColor: 'border-emerald-200', textColor: 'text-emerald-700' },
+  { id: 'B', name_zh: 'B店 (幸運找換)', name_en: 'Shop B (Lucky Exchange)', rate: 3, color: 'bg-blue-600', lightColor: 'bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
+  { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
+];
+
+// --- 3. Smart Question Generator (v6.2 Logic) ---
+const ITEMS_DB = [
+  { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
+  { name: '擦膠', unit: '塊' }, { name: '鉛筆', unit: '枝' }, { name: '原子筆', unit: '枝' },
+  { name: '間尺', unit: '把' }, { name: '筆記簿', unit: '本' }, { name: '練習簿', unit: '本' },
+  { name: '故事書', unit: '本' }, { name: '漫畫', unit: '本' }, { name: '圖畫紙', unit: '包' },
+  { name: '三文治', unit: '件' }, { name: '漢堡包', unit: '個' }, { name: '熱狗', unit: '隻' },
+  { name: '薯片', unit: '包' }, { name: '朱古力', unit: '排' }, { name: '糖果', unit: '包' },
+  { name: '珍珠奶茶', unit: '杯' }, { name: '果汁', unit: '瓶' },
+  { name: '玩具車', unit: '輛' }, { name: '公仔', unit: '個' }, { name: '機械人', unit: '個' },
+  { name: '顏色筆', unit: '盒' }, { name: '貼紙', unit: '張' }, { name: '遊戲卡', unit: '包' }
+];
+
+const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
+const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) => {
+  let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
+  let signature = "";
+  let subType = "";
+  let attempts = 0;
+
+  const isAppTurn = (questionIndex % 3 === 0); 
+  
+  do {
+    attempts++;
+    const rand = Math.random();
+
+    if (difficulty === 'low') {
+      score = 5; penalty = 2;
+      
+      if (!isAppTurn) { 
+        if (rand < 0.5) {
+          const n1 = randomInt(12, 49); 
+          const n2 = randomInt(2, 6);   
+          q = `${n1} × ${n2} = ?`;
+          a = n1 * n2;
+          hint = `數學老師提示：\n試用直式計算。先算個位 ${n1%10} × ${n2}，再算十位。`;
+          category = 'mul';
+          subType = 'calc_mul';
+          signature = `mul-${n1}-${n2}`;
+        } else {
+          const ans = randomInt(12, 19); 
+          const n2 = randomInt(2, 5);    
+          const total = ans * n2;
+          q = `${total} ÷ ${n2} = ?`;
+          a = ans;
+          hint = `數學老師提示：\n${n2} 乘 10 是 ${n2*10}，答案比 10 大一點。`;
+          category = 'div';
+          subType = 'calc_div';
+          signature = `div-${total}-${n2}`;
+        }
+      } else { 
+        const item = getRandomItem();
+        const count = randomInt(2, 5); 
+        const price = randomInt(12, 25); 
+        
+        if (randomInt(1, 2) === 1) {
+             q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
+        } else {
+             q = `小明想買 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共要付多少錢？`;
+        }
+        
+        a = price * count;
+        hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count})。`;
+        category = 'app';
+        subType = 'app_shopping';
+        signature = `app-${price}-${count}`;
+      }
+    } 
+    else if (difficulty === 'mid') {
+      score = 10; penalty = 5;
+      
+      if (!isAppTurn) { 
+        if (rand < 0.5) {
+          const n1 = randomInt(35, 95); 
+          const n2 = randomInt(3, 8);   
+          q = `${n1} × ${n2} = ?`;
+          a = n1 * n2;
+          hint = "直式計算：注意進位！先算個位，積滿十要進到十位。";
+          category = 'mul';
+          subType = 'calc_mul';
+          signature = `mul-${n1}-${n2}`;
+        } else {
+          let ans;
+          do { ans = randomInt(13, 35); } while (ans % 10 === 0 || ans % 11 === 0);
+          const n2 = randomInt(3, 7);    
+          const total = ans * n2;
+          q = `${total} ÷ ${n2} = ?`;
+          a = ans;
+          hint = `試用直式除法：先看十位夠不夠除。`;
+          category = 'div';
+          subType = 'calc_div';
+          signature = `div-${total}-${n2}`;
+        }
+      } else { 
+        const item = getRandomItem();
+        const tpl = randomInt(1, 3);
+        
+        if (tpl === 1) { 
+            const count = randomInt(4, 9);
+            const price = randomInt(15, 45);
+            q = `老師買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
+            a = price * count;
+            hint = `總金額 = 單價 × 數量。`;
+            subType = 'app_shopping';
+            signature = `app-${price}-${count}`;
+        } else if (tpl === 2) { 
+            const total = randomInt(40, 90);
+            const perPerson = randomInt(3, 8);
+            const grandTotal = total - (total % perPerson); 
+            q = `有 ${grandTotal} ${item.unit}${item.name}，平均分給 ${perPerson} 位同學，每人可得多少${item.unit}？`;
+            a = grandTotal / perPerson;
+            hint = `關鍵字是「平均分」，這代表要用除法。`;
+            subType = 'app_sharing';
+            signature = `app-${grandTotal}-${perPerson}`;
+        } else { 
+            const days = randomInt(5, 9);
+            const saving = randomInt(12, 25);
+            q = `小美每天儲蓄 $${saving}，${days} 天後她共儲蓄了多少元？`;
+            a = saving * days;
+            hint = `每天存一樣的錢，存了多天，用乘法計算總額。`;
+            subType = 'app_savings';
+            signature = `app-${saving}-${days}`;
+        }
+        category = 'app';
+      }
+    } 
+    else { 
+      score = 20; penalty = 10;
+      category = 'app'; 
+
+      const HIGH_TYPES = [
+          'shopping', 'change', 'mixed_money', 'savings', 
+          'length', 'weight', 'general_mul', 'general_div', 'leftover' 
+      ];
+      
+      const availableTypes = HIGH_TYPES.filter(t => t !== lastType);
+      const chosenType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+      
+      subType = chosenType; 
+
+      const item = getRandomItem();
+
+      if (chosenType === 'shopping') {
+          const count = randomInt(6, 15);
+          const price = randomInt(45, 120);
+          q = `學校訂購了 ${count} ${item.unit}${item.name}，每${item.unit}價值 $${price}。學校共需支付多少元？`;
+          a = price * count;
+          hint = `數字較大，請小心用直式乘法：$${price} × ${count}`;
+          signature = `high-shop-${price}-${count}`;
+
+      } else if (chosenType === 'change') {
+          const wallet = randomInt(5, 10) * 100;
+          const count = randomInt(3, 6);
+          const price = randomInt(45, 85);
+          const cost = price * count;
+          if (cost >= wallet) {
+             q = `爸爸想買 ${count} ${item.unit}${item.name} (每${item.unit} $${price})，需付多少元？`;
+             a = cost;
+             hint = `總價 = 單價 × 數量。`;
+          } else {
+             q = `爸爸有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。應找回多少元？`;
+             a = wallet - cost;
+             hint = `這題有兩步：1. 先算總花費 2. 再用 $${wallet} 減去花費。`;
+          }
+          signature = `high-change-${wallet}-${price}-${count}`;
+
+      } else if (chosenType === 'mixed_money') {
+          const item2 = ITEMS_DB[(ITEMS_DB.indexOf(item) + 3) % ITEMS_DB.length];
+          const p1 = randomInt(25, 60);
+          const p2 = randomInt(15, 40);
+          const qty1 = randomInt(2, 5);
+          const qty2 = randomInt(2, 4);
+          q = `買 ${qty1} ${item.unit}${item.name} (每${item.unit}$${p1}) 和 ${qty2} ${item2.unit}${item2.name} (每${item2.unit}$${p2})，共需付多少元？`;
+          a = (p1 * qty1) + (p2 * qty2);
+          hint = `混合題：先分開算兩種物品的總價，再相加。`;
+          signature = `high-mix-${p1}-${qty1}-${p2}-${qty2}`;
+
+      } else if (chosenType === 'savings') {
+          const weeks = randomInt(4, 12);
+          const weeklySaving = randomInt(50, 150);
+          q = `小明每星期儲蓄 $${weeklySaving}，${weeks} 星期後他共儲蓄了多少元？`;
+          a = weeklySaving * weeks;
+          hint = `每星期存 $${weeklySaving}，存了 ${weeks} 次，用乘法。`;
+          signature = `high-save-${weeklySaving}-${weeks}`;
+      }
+
+      else if (chosenType === 'length') {
+          const len = randomInt(15, 45); 
+          const count = randomInt(4, 9);
+          q = `一條絲帶長 ${len} 厘米，老師買了 ${count} 條，共有多少厘米？`;
+          a = len * count;
+          hint = `每條長 ${len} cm，有 ${count} 條，用乘法求總長度。`;
+          signature = `high-len-${len}-${count}`;
+
+      } else if (chosenType === 'weight') {
+          const weight = randomInt(120, 250); 
+          const count = randomInt(3, 6);
+          q = `一個蘋果重 ${weight} 克，${count} 個蘋果共重多少克？`;
+          a = weight * count;
+          hint = `單個重量 × 數量 = 總重量。`;
+          signature = `high-wgt-${weight}-${count}`;
+
+      } else if (chosenType === 'general_mul') {
+          const shelves = randomInt(4, 9);
+          const booksPerShelf = randomInt(25, 65);
+          q = `圖書館有 ${shelves} 個書架，每個書架放了 ${booksPerShelf} 本書，共有書多少本？`;
+          a = booksPerShelf * shelves;
+          hint = `每架有 ${booksPerShelf} 本，有 ${shelves} 架，用乘法。`;
+          signature = `high-gen-mul-${booksPerShelf}-${shelves}`;
+
+      } else if (chosenType === 'general_div') {
+          const totalItems = randomInt(15, 60) * 5; 
+          const boxes = 5;
+          q = `工廠生產了 ${totalItems} 塊餅乾，平均裝入 ${boxes} 個罐子，每罐有多少塊？`;
+          a = totalItems / boxes;
+          hint = `「平均裝入」是除法題目。`;
+          signature = `high-gen-div-${totalItems}-${boxes}`;
+
+      } else if (chosenType === 'leftover') {
+          const start = randomInt(100, 300);
+          const deduct = randomInt(10, 30);
+          const count = randomInt(3, 6);
+          q = `水桶裡有 ${start} 毫升水，倒出了 ${count} 杯，每杯 ${deduct} 毫升。水桶裡還剩下多少毫升水？`;
+          a = start - (deduct * count);
+          hint = `1. 先算倒出了多少水 (${deduct} × ${count})\n2. 再用原本的水量減去倒出的量。`;
+          signature = `high-leftover-${start}-${deduct}-${count}`;
       }
     }
-  }
-  return data;
+
+  } while (signature === lastQSignature && attempts < 10); 
+
+  return { q, a, score, penalty, difficulty, hint, category, signature, subType };
 };
 
-// --- 3. Game Logic Helpers (Standard v6.3 Questions) ---
-const generateQuestion = (type) => {
-  let q = {};
-  if (type === 'basic') {
-    const target = (Math.floor(Math.random() * 10) + 1) * 10;
-    q = { text: `請湊出 ${target} 元`, answer: target, unit: "元" };
-  } else if (type === 'shopping') {
-    const price = Math.floor(Math.random() * 80) + 10;
-    const paid = Math.ceil(price / 10) * 10 + (Math.random() > 0.5 ? 0 : 10);
-    q = { text: `買文具用了 ${price} 元，付款 ${paid} 元，應找回多少元？`, answer: paid - price, unit: "元" };
-  } else if (type === 'time') {
-    const startH = Math.floor(Math.random() * 10) + 1;
-    const duration = Math.floor(Math.random() * 3) + 1;
-    q = { text: `現在是下午 ${startH} 時，${duration} 小時後是下午幾時？`, answer: startH + duration, unit: "時" };
-  }
-  return q;
-};
+// CSV Data (Replaced with Full Student List)
+const RAW_CSV_DATA = `學生註冊編號,學年,級別,班別代碼,班號,學生編號,英文姓名,中文姓名
+W23083,2025,P3,3A,1,S9014979,CHAN SHEUNG KI,陳尚頎
+W24117,2025,P3,3A,2,S9025822,CHAN TING YAN,陳廷欣
+W23082,2025,P3,3A,3,S8840050,CHAN TSZ TUNG,陳芷潼
+W23038,2025,P3,3A,4,41903790,CHAN UE CHI,陳妤芝
+W23085,2025,P3,3A,5,M9132207,CHAU KWAN YIU,周均垚
+W23089,2025,P3,3A,6,S9036638,CHIU YU HIN,趙宇軒
+W23090,2025,P3,3A,7,S8775291,CHOI TSZ CHING,蔡芷晴
+W23092,2025,P3,3A,8,S8957705,FUNG HO YING HAILIE,馮可盈
+W23041,2025,P3,3A,9,S8983447,FUNG HOI KAN,馮凱勤
+W23012,2025,P3,3A,10,S8812014,KWONG HAYDEN,鄺廷羲
+W25110,2025,P3,3A,11,74323819,LAN BINJIA,藍彬嘉
+W23016,2025,P3,3A,12,S9024184,LAW PUI YI,羅貝兒
+W23097,2025,P3,3A,13,S8890481,LEE CHAU YI,李秋兒
+W23048,2025,P3,3A,14,S9001338,LIN HEI LAM,連希霖
+W23049,2025,P3,3A,15,S8758567,LIU SUM YIU,廖心媱
+W25111,2025,P3,3A,16,S8788024,LIU TSZ KI,劉芷琪
+W23073,2025,P3,3A,17,S8988252,PANG YU HANG,彭宇恒
+W23024,2025,P3,3A,18,S898947A,SAMPEDRO HERNANDEZ MIA,黎美雅
+W23026,2025,P3,3A,19,S8978257,TANG HOU LEON,鄧灝麟
+W23028,2025,P3,3A,20,S8785165,TSANG PO SZE,曾寶詩
+W23100,2025,P3,3A,21,S8597717,TSUI TSZ WUN,徐梓媛
+W23074,2025,P3,3A,22,S9037294,WANG YIK WUN,王亦桓
+W23031,2025,P3,3A,23,S9021746,WONG WAI FUNG,黃偉灃
+W23035,2025,P3,3A,24,S9293770,YEUNG PUI HEI,楊培熙
+W23077,2025,P3,3A,25,S8940802,YIP HOI KI,葉海棋
+W23078,2025,P3,3A,26,S8591441,YIP TSZ HIN,葉梓軒
+W23059,2025,P3,3B,1,S902463A,CHAN HOK YI ZISHAN,陳學而
+W25109,2025,P3,3B,2,S8492001,CHAN KIN TING,陳建廷
+W23004,2025,P3,3B,3,S8896129,CHAN ON YIN,陳安妍
+W23037,2025,P3,3B,4,S8602672,CHAN TAK LAM,陳德林
+W23081,2025,P3,3B,5,S8840042,CHAN TSZ KIN,陳梓健
+W23005,2025,P3,3B,6,S8837130,CHENG YIP CHUEN,鄭業泉
+W23087,2025,P3,3B,7,S8394441,CHEUNG HOI TING,張凱婷
+W23007,2025,P3,3B,8,S9031601,CHEUNG PAK KIU,張珀僑
+W23043,2025,P3,3B,9,S9034864,HUANG HOI CHUN,黃凱駿
+W23064,2025,P3,3B,10,S8803031,HUNG WING SUM,孔詠芯
+W23010,2025,P3,3B,11,S8764206,KAN MAN KI,簡汶琪
+W23044,2025,P3,3B,12,S9050568,KWOK ANGIE CHIN YIU,郭芊瑤
+W23045,2025,P3,3B,13,S9016106,LAI HAU SHING,賴孝晟
+W23046,2025,P3,3B,14,S9050924,LEUNG WING TUNG,梁詠瞳
+W23098,2025,P3,3B,15,S8726843,LI HANG KEI,李幸錡
+W23019,2025,P3,3B,16,41904215,LIN SZE MAU,林思漫
+W23022,2025,P3,3B,17,S9023641,LO KI KI,盧琦淇
+W23069,2025,P3,3B,18,S887169A,LUI KAI YING,呂佳瑩
+W23099,2025,P3,3B,19,S8657574,NG KAI YUI,吳楷睿
+W23072,2025,P3,3B,20,S8817431,NG YAN YU,吳忻妤
+W23029,2025,P3,3B,21,S8961745,TSANG SHING HEI,曾承希
+W23054,2025,P3,3B,22,S903970A,WEN SIN YU,?善喻
+W23033,2025,P3,3B,23,S9023579,YANG TING HEI,楊廷熙
+W23104,2025,P3,3B,24,S902074A,YUEN CHUN TANG,袁振騰
+W23079,2025,P3,3B,25,S9029712,ZHU PAK LAM,朱柏霖
+W23003,2025,P3,3C,1,S9016351,CHAN HEI TING,陳希婷
+W23084,2025,P3,3C,2,S9032969,CHAN YUE ALSTON,陳譽
+W23086,2025,P3,3C,3,S902169A,CHENG SUM YAU BIANCA,鄭心悠
+W22033,2025,P3,3C,4,S8077942,CHEUNG YING JIE,張應杰
+W22005,2025,P3,3C,5,S8157334,CHEUNG YU SHING,張語城
+W23063,2025,P3,3C,6,S9039947,CHOI YUEN TUNG,蔡宛彤
+W23011,2025,P3,3C,7,41898538,KOO HO YU,古皓宇
+W23094,2025,P3,3C,8,S8727874,LAM SUM CHING,林芯晴
+W23017,2025,P3,3C,9,S9016823,LAW SUM WING,羅心穎
+W23068,2025,P3,3C,10,S919456A,LAW YIU SING,羅耀升
+W23020,2025,P3,3C,11,41903818,LIU KEXIN,劉可欣
+W23021,2025,P3,3C,12,S8891070,LIU POK HON,劉博瀚
+W23070,2025,P3,3C,13,S8987736,MAN HEI WAI,文希維
+W23050,2025,P3,3C,14,S8794806,SHU CHUNG KWOK,束鍾國
+W23025,2025,P3,3C,15,S9019326,SZE YUET LAM FEDORA,施玥琳
+W23052,2025,P3,3C,16,S8973093,TONG TSZ YUI,湯子睿
+W23053,2025,P3,3C,17,S9035240,TSANG HO FUNG,曾浩楓
+W24126,2025,P3,3C,18,74186620,TSUI PUI KI,徐佩琪
+W23075,2025,P3,3C,19,M8020138,WONG TSZ TUNG,黃芷桐
+W23032,2025,P3,3C,20,S9242149,WOO MAN LIN,胡曼琳
+W23055,2025,P3,3C,21,S9000129,WU HAOEN,吳浩恩
+W23101,2025,P3,3C,22,M9818494,WU JIALIN,吳嘉淋
+W23102,2025,P3,3C,23,S8465284,YAN YUK HO,顏鈺壕
+W23076,2025,P3,3C,24,S9019784,YEUNG MING HEI,楊明熙
+W23001,2025,P3,3D,1,S8842177,AU HOI YEE,歐鎧沂
+W22060,2025,P3,3D,2,S8082865,AU SZE YU,區思宇
+W23002,2025,P3,3D,3,S8978583,CHAN CHIT LONG JAYVIS,陳哲朗
+W23036,2025,P3,3D,4,S9021967,CHAN MEI CHI MAY,陳美芝
+W23039,2025,P3,3D,5,S8985342,CHAN WING YI,陳泳沂
+W23040,2025,P3,3D,6,S8395022,CHENG TSZ YING,鄭梓瀅
+W23091,2025,P3,3D,7,S8915603,CHU CHUN KIT,朱俊傑
+W23009,2025,P3,3D,8,S8909840,DENG TSZ YAN,鄧梓欣
+W23042,2025,P3,3D,9,S8382206,HONG WAI HEI,洪維禧
+W23093,2025,P3,3D,10,M9414679,HUNG YIK MAN,洪翊文
+W23080,2025,P3,3D,11,S8385523,LAI YU HO,黎宇皓
+W23066,2025,P3,3D,12,41903914,LAM SZE HAM,林詩涵
+W23013,2025,P3,3D,13,S8385167,LAM TSZ WAI VIANNE,林子蕙
+W23096,2025,P3,3D,14,S8915085,LAU CHEUK WING,劉綽穎
+W23015,2025,P3,3D,15,41898495,LAW PO YU,羅寶瑜
+W23130,2025,P3,3D,16,74163097,LEUNG YUK NING,梁育寧
+W23047,2025,P3,3D,17,S8331245,LI KA LOK,李嘉樂
+W23071,2025,P3,3D,18,S8987728,MAN HEI YUI,文希睿
+W23023,2025,P3,3D,19,41903298,MARK HO LAM,麥可琳
+W23051,2025,P3,3D,20,S8964280,SUEN YAT CHI,孫逸智
+W23027,2025,P3,3D,21,S9012003,TONG TSZ TO,唐梓滔
+W23056,2025,P3,3D,22,S8977021,YIM MAN SIU,嚴文少
+W23057,2025,P3,3D,23,S8981118,YIP CHEUK LAM,葉卓霖
+W23103,2025,P3,3D,24,S8679519,YUE HO TAK,余浩德
+`;
 
-// --- 4. Main Component ---
-function App() {
-  // State
-  const [view, setView] = useState('landing'); // landing, student_select, game, teacher, net
-  const [allStudents, setAllStudents] = useState([]);
-  const [selectedClass, setSelectedClass] = useState('3A');
-  const [selectedStudent, setSelectedStudent] = useState(null);
-  const [question, setQuestion] = useState(null);
-  const [inputAns, setInputAns] = useState('');
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('home');
+  const [loading, setLoading] = useState(true);
+  const [isStarting, setIsStarting] = useState(false); 
+  const [offlineMode, setOfflineMode] = useState(false);
+
+  // Student State
+  const [studentView, setStudentView] = useState('class_select');
+  const [selectedClass, setSelectedClass] = useState('');
+  const [currentStudent, setCurrentStudent] = useState(null);
+  const [difficulty, setDifficulty] = useState('low');
+  const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [questionCount, setQuestionCount] = useState(0); 
+  const [lastQSignature, setLastQSignature] = useState(''); 
+  const [lastQuestionType, setLastQuestionType] = useState(''); // NEW: Track last type for High Difficulty
+   
+  // Game State
+  const [timeLeft, setTimeLeft] = useState(GAME_DURATION);
+  const [answer, setAnswer] = useState('');
   const [feedback, setFeedback] = useState(null);
-  
-  // Teacher Upload State
-  const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef(null);
+  const [shake, setShake] = useState(false); 
+  const [gameActive, setGameActive] = useState(false);
+  const [strikes, setStrikes] = useState(0); 
+  const [sessionScore, setSessionScore] = useState(0); 
+  const [totalAccumulatedScore, setTotalAccumulatedScore] = useState(0);
+  const [sessionCorrect, setSessionCorrect] = useState(0);
+  const [sessionWrong, setSessionWrong] = useState(0); 
 
-  // Auth & Data Sync
-  useEffect(() => {
-    signInAnonymously(auth);
-    // Real-time listener for students
-    const unsub = onSnapshot(collection(db, "students"), (snapshot) => {
-      const studentsData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      setAllStudents(studentsData);
+  // Teacher State
+  const [teacherPwd, setTeacherPwd] = useState('');
+  const [liveData, setLiveData] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [editScoreVal, setEditScoreVal] = useState('');
+
+  // NET State
+  const [netPwd, setNetPwd] = useState('');
+  const [selectedShop, setSelectedShop] = useState(null); 
+
+  // Data Parsing (Updated for Number. Name)
+  const allStudents = useMemo(() => {
+    const lines = RAW_CSV_DATA.trim().split('\n').slice(1);
+    return lines.map(line => {
+      const p = line.split(',');
+      const cls = p[3];
+      const num = parseInt(p[4]); // Extract class number
+      const name_zh = p[7];
+      const name_en = p[6];
+      // ID unique key
+      return { 
+        class: cls, 
+        number: num, 
+        name_zh: name_zh, 
+        name_en: name_en, 
+        id: `${cls}_${num}` 
+      };
     });
-    return () => unsub();
   }, []);
 
-  // Filter Logic
-  const filteredStudents = useMemo(() => {
-    return allStudents
-      .filter(s => s.className === selectedClass)
-      .sort((a, b) => parseInt(a.number) - parseInt(b.number));
-  }, [allStudents, selectedClass]);
+  const studentsByClass = useMemo(() => {
+    const map = { '3A': [], '3B': [], '3C': [], '3D': [] };
+    // Sort by class number numerically
+    allStudents.forEach(s => { 
+      if(map[s.class]) map[s.class].push(s); 
+    });
+    // Sort each class array
+    Object.keys(map).forEach(k => {
+      map[k].sort((a, b) => a.number - b.number);
+    });
+    return map;
+  }, [allStudents]);
 
-  // Handle Answer
-  const submitAnswer = async () => {
-    if (!question) return;
-    const isCorrect = parseInt(inputAns) === question.answer;
-    setFeedback(isCorrect ? 'correct' : 'wrong');
-    if (isCorrect && selectedStudent) {
-      await updateDoc(doc(db, "students", selectedStudent.id), { score: increment(10) });
-      setSelectedStudent(prev => ({ ...prev, score: (prev.score || 0) + 10 }));
+  // Styles for Shake Animation
+  const shakeStyle = `
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+      20%, 40%, 60%, 80% { transform: translateX(10px); }
+    }
+    .animate-shake {
+      animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+      border-color: #ef4444 !important; /* Red border */
+      background-color: #fef2f2 !important; /* Red bg */
+    }
+  `;
+
+  // Auth Init
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const token = (window).__initial_auth_token;
+        if (token) {
+          await signInWithCustomToken(auth, token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth Failed:", err);
+      }
+      setLoading(false);
+    };
+    init();
+    return onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u) setOfflineMode(false);
+    });
+  }, []);
+
+  // Timer
+  useEffect(() => {
+    let timer;
+    if (gameActive && timeLeft > 0) {
+      timer = setInterval(() => setTimeLeft(t => t - 1), 1000);
+    } else if (gameActive && timeLeft === 0) {
+      endGame();
+    }
+    return () => clearInterval(timer);
+  }, [gameActive, timeLeft]);
+
+  // Unified Live Monitor
+  useEffect(() => {
+    if (!user || (view !== 'teacher' && view !== 'net_dashboard')) return;
+    
+    const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+    const unsub = onSnapshot(q, (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setLiveData(data.sort((a, b) => b.score - a.score));
+    }, (error) => {
+      console.log("Monitor offline:", error);
+    });
+    return () => unsub();
+  }, [user, view]);
+
+  // --- Logic ---
+  
+  // RESET LOGIC FOR BACK TO HOME (Full Reset)
+  const handleBackToHome = () => {
+    setStudentView('class_select');
+    setCurrentStudent(null);
+    setSessionScore(0);
+    setTotalAccumulatedScore(0);
+    setSessionCorrect(0);
+    setSessionWrong(0);
+    setStrikes(0);
+    setCurrentQuestion(null);
+    setIsStarting(false);
+    setLastQuestionType('');
+    setView('home');
+  };
+
+  // PLAY AGAIN LOGIC (Keep Student, Reset Session)
+  const handlePlayAgain = () => {
+    setSessionScore(0);
+    setSessionCorrect(0);
+    setSessionWrong(0);
+    setStrikes(0);
+    setCurrentQuestion(null);
+    setIsStarting(false);
+    setLastQuestionType('');
+    setStudentView('difficulty'); // Go to difficulty select directly
+  };
+
+  const startGame = async () => {
+    if (!currentStudent) {
+      alert("請先選擇學生 (Please select a student)");
+      return;
+    }
+
+    setIsStarting(true);
+    
+    let isOffline = offlineMode;
+    if (!user) {
+      try {
+        await signInAnonymously(auth);
+        await new Promise(r => setTimeout(r, 500));
+        if (!auth.currentUser) throw new Error("Auth failed");
+      } catch (e) {
+        isOffline = true;
+        setOfflineMode(true);
+      }
+    }
+
+    setGameActive(true);
+    setSessionScore(0);
+    setSessionCorrect(0); 
+    setSessionWrong(0);
+    setStrikes(0);
+    setTimeLeft(GAME_DURATION);
+    setQuestionCount(0); // Reset question count for 2:1 ratio
+    
+    const q = generateQuestion(difficulty, 1, '', ''); // First question, no history
+    setCurrentQuestion(q);
+    setLastQSignature(q.signature);
+    setLastQuestionType(q.subType);
+    
+    if (!isOffline && user) {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id);
+      try {
+        const snap = await getDoc(docRef);
+        let prevScore = 0;
+        let prevCorrect = 0;
+        let prevWrong = 0;
+        if (snap.exists()) {
+          prevScore = snap.data().score || 0;
+          prevCorrect = snap.data().correctCount || 0;
+          prevWrong = snap.data().wrongCount || 0;
+        }
+        setTotalAccumulatedScore(prevScore); 
+        setSessionCorrect(prevCorrect);
+        setSessionWrong(prevWrong);
+
+        await setDoc(docRef, {
+          name: currentStudent.name_zh,
+          name_en: currentStudent.name_en,
+          class: currentStudent.class,
+          number: currentStudent.number, // Save class number
+          status: 'playing',
+          score: prevScore,
+          correctCount: prevCorrect,
+          wrongCount: prevWrong,
+          redeemed: snap.exists() ? snap.data().redeemed : false,
+          timestamp: serverTimestamp()
+        }, { merge: true });
+      } catch (e) {
+        setOfflineMode(true);
+        setTotalAccumulatedScore(0);
+      }
+    } else {
+      setTotalAccumulatedScore(0);
+    }
+
+    setStudentView('play');
+    setIsStarting(false);
+  };
+
+  const submitAnswer = (e) => {
+    e.preventDefault();
+    if (!gameActive) return;
+    const correct = parseFloat(answer) === currentQuestion.a;
+    
+    if (correct) {
+      const gained = currentQuestion.score;
+      setSessionScore(s => s + gained);
+      setTotalAccumulatedScore(s => s + gained);
+      setSessionCorrect(s => s + 1);
+      setFeedback({ ok: true, msg: `答對了！+${gained} 分` });
+      
+      if(!offlineMode && user && currentStudent) {
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { 
+          score: increment(gained),
+          correctCount: increment(1)
+        }).catch(() => setOfflineMode(true));
+      }
+      
+      setTimeout(() => {
+        setFeedback(null);
+        setAnswer('');
+        setStrikes(0);
+        
+        // Generate Next Question
+        const nextCount = questionCount + 1;
+        setQuestionCount(nextCount);
+        const q = generateQuestion(difficulty, nextCount + 1, lastQSignature, lastQuestionType);
+        setCurrentQuestion(q);
+        setLastQSignature(q.signature);
+        setLastQuestionType(q.subType);
+
+      }, 800);
+
+    } else {
+      // Wrong Answer Logic
+      const newStrikes = strikes + 1;
+      setStrikes(newStrikes);
+      
+      // Trigger Shake Animation
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+
+      if (newStrikes < 3) {
+        setFeedback({ 
+          ok: false, 
+          msg: `答錯了！${currentQuestion.hint} (還有 ${3 - newStrikes} 次機會)` 
+        });
+        setAnswer(''); 
+        // Hint stays
+      } else {
+        const penalty = currentQuestion.penalty;
+        setSessionScore(s => s - penalty); 
+        setTotalAccumulatedScore(s => Math.max(0, s - penalty));
+        setSessionWrong(s => s + 1);
+        setFeedback({ ok: false, msg: `3次錯誤！扣 ${penalty} 分。答案是 ${currentQuestion.a}` });
+        
+        if(!offlineMode && user && currentStudent) {
+          const errField = `errors.${currentQuestion.category}`;
+          updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { 
+            score: increment(-penalty),
+            wrongCount: increment(1),
+            [errField]: increment(1)
+          }).catch(() => setOfflineMode(true));
+        }
+
+        setTimeout(() => {
+          setFeedback(null);
+          setAnswer('');
+          setStrikes(0);
+          
+          // Generate Next Question
+          const nextCount = questionCount + 1;
+          setQuestionCount(nextCount);
+          const q = generateQuestion(difficulty, nextCount + 1, lastQSignature, lastQuestionType);
+          setCurrentQuestion(q);
+          setLastQSignature(q.signature);
+          setLastQuestionType(q.subType);
+
+        }, 2000); 
+      }
     }
   };
 
-  // --- Teacher Function: Import CSV ---
-  const handleImportCSV = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setIsUploading(true);
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const rawText = event.target.result;
-        const newStudents = parseStudentsFromCSV(rawText);
-
-        if (newStudents.length === 0) {
-          alert("CSV 解析失敗：找不到符合格式的資料 (Col D=Class, Col E=No, Col H=Name)");
-          setIsUploading(false);
-          return;
-        }
-
-        if(!confirm(`確認匯入？\n這將清除現有資料庫並寫入 ${newStudents.length} 名學生資料。`)) {
-            setIsUploading(false);
-            return;
-        }
-
-        // 1. Delete Existing Data (Batch)
-        const batch = writeBatch(db);
-        const existingDocs = await getDocs(collection(db, "students"));
-        existingDocs.forEach(d => batch.delete(d.ref));
-
-        // 2. Write New Data
-        newStudents.forEach(s => {
-          const ref = doc(db, "students", s.id);
-          batch.set(ref, s);
-        });
-
-        await batch.commit();
-        alert("匯入成功！資料庫已更新。");
-        
-      } catch (err) {
-        console.error(err);
-        alert("匯入錯誤：" + err.message);
-      } finally {
-        setIsUploading(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      }
-    };
-    reader.readAsText(file);
+  const endGame = () => {
+    setGameActive(false);
+    setStudentView('result');
+    if(!offlineMode && user && currentStudent) {
+      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', currentStudent.id), { status: 'finished' });
+    }
   };
 
-  // --- Views ---
+  const toggleRedeem = async (student, currentStatus) => {
+    if(!user) return;
+    
+    // Undo
+    if (currentStatus) {
+      if (!confirm("⚠️ 確定要撤銷此兌換嗎？(Undo this redemption?)")) return;
+    }
 
-  // 1. Landing Page (Restored v6.3 Style)
-  if (view === 'landing') {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-        <h1 className="text-4xl md:text-5xl font-black text-indigo-700 mb-12 tracking-tight">
-          P.3 理財數學王 v6.7
-        </h1>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-5xl">
-          {/* Student Button */}
-          <button 
-            onClick={() => setView('student_select')}
-            className="group relative bg-white p-8 rounded-3xl shadow-lg border-2 border-transparent hover:border-indigo-500 hover:shadow-2xl transition-all flex flex-col items-center gap-4"
-          >
-            <div className="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-              <GraduationCap size={48} className="text-indigo-600" />
-            </div>
-            <span className="text-2xl font-bold text-slate-700">我是學生</span>
-          </button>
+    try {
+      const updateData = { redeemed: !currentStatus };
+      
+      // LOG GENERATION (Only when redeeming)
+      if (!currentStatus && selectedShop) {
+         const hkd = student.score * selectedShop.rate;
+         const logMsg = `${student.name_en} exchanged $${hkd} HKD at ${selectedShop.name_en}`;
+         updateData.lastLog = logMsg;
+      }
 
-          {/* Teacher Button */}
-          <button 
-            onClick={() => setView('teacher')}
-            className="group relative bg-white p-8 rounded-3xl shadow-lg border-2 border-transparent hover:border-emerald-500 hover:shadow-2xl transition-all flex flex-col items-center gap-4"
-          >
-            <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-              <Users size={48} className="text-emerald-600" />
-            </div>
-            <span className="text-2xl font-bold text-slate-700">老師專用</span>
-          </button>
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', student.id), updateData);
+    } catch(e) {
+      alert("Action failed (Check connection)");
+    }
+  };
 
-          {/* NET Button */}
-          <button 
-            onClick={() => setView('net')}
-            className="group relative bg-white p-8 rounded-3xl shadow-lg border-2 border-transparent hover:border-orange-500 hover:shadow-2xl transition-all flex flex-col items-center gap-4"
-          >
-            <div className="w-24 h-24 bg-orange-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-              <Globe size={48} className="text-orange-600" />
-            </div>
-            <span className="text-2xl font-bold text-slate-700">NET Teacher</span>
-          </button>
+  const saveEdit = async (id) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', id), { score: parseInt(editScoreVal) });
+      setEditingId(null);
+    } catch(e) {
+      alert("Save failed (Offline)");
+    }
+  };
+
+  const handleResetRedemptionsOnly = async () => {
+    const pwd = prompt("請輸入重設密碼 (Enter Password to Reset All Redemptions):");
+    if (pwd !== RESET_PWD) {
+      alert("密碼錯誤 (Wrong Password)");
+      return;
+    }
+    if(!confirm("⚠️ 注意 Warning ⚠️\n這將重置所有學生的「兌換狀態」為未兌換，分數保留不變！\n確定要執行嗎？")) return;
+
+    try {
+      const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((docSnap) => {
+        // Only reset redemption status, keep scores
+        batch.update(docSnap.ref, { 
+          redeemed: false, 
+          // Optional: clear log if we want to reset the history of redemption
+          lastLog: '' // Or keep log but reset status, decided to clear log to avoid confusion
+        });
+      });
+      await batch.commit();
+      alert("所有兌換狀態已重置 (All redemptions reset).");
+    } catch (e) {
+      alert("重置失敗 (Reset Failed): " + e.message);
+    }
+  };
+
+  const handleResetAll = async () => {
+    const pwd = prompt("請輸入重設密碼 (Enter Password to Reset All Scores):");
+    if (pwd !== RESET_PWD) {
+      alert("密碼錯誤 (Wrong Password)");
+      return;
+    }
+    if(!confirm("⚠️ 危險操作 Warning ⚠️\n這將重置所有學生的分數歸零，且無法復原！\n確定要執行嗎？")) return;
+
+    try {
+      const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((docSnap) => {
+        batch.update(docSnap.ref, { 
+          score: 0, 
+          redeemed: false, 
+          status: 'ready',
+          correctCount: 0,
+          wrongCount: 0,
+          lastLog: '', 
+          'errors.mul': 0,
+          'errors.div': 0,
+          'errors.app': 0,
+          'errors.logic': 0
+        });
+      });
+      await batch.commit();
+      alert("所有分數及數據已重置 (All data reset).");
+    } catch (e) {
+      alert("重置失敗 (Reset Failed): " + e.message);
+    }
+  };
+
+  const downloadCSV = () => {
+    const headers = ["Class", "Number", "Name", "Score", "Correct", "Wrong", "Accuracy (%)", "Analysis"];
+    const csvRows = [headers.join(",")];
+
+    liveData.forEach(s => {
+      const correct = s.correctCount || 0;
+      const wrong = s.wrongCount || 0;
+      const total = correct + wrong;
+      const accuracy = total > 0 ? ((correct / total) * 100).toFixed(1) : "0.0";
+      
+      let analysis = "表現均衡 (Balanced)";
+      const errs = s.errors || {};
+      const maxErr = Math.max(errs.mul || 0, errs.div || 0, errs.app || 0, errs.logic || 0);
+      
+      if (maxErr > 0) {
+        if (maxErr === errs.app) analysis = "應用題需加強 (Weak in Word Problems)";
+        else if (maxErr === errs.div) analysis = "除法運算需加強 (Weak in Division)";
+        else if (maxErr === errs.mul) analysis = "乘法運算需加強 (Weak in Multiplication)";
+        else if (maxErr === errs.logic) analysis = "邏輯思維需加強 (Weak in Logic)";
+      }
+      if (total === 0) analysis = "尚未開始 (Not Started)";
+
+      const row = [
+        s.class,
+        s.number,
+        s.name,
+        s.score,
+        correct,
+        wrong,
+        accuracy,
+        analysis
+      ];
+      csvRows.push(row.join(","));
+    });
+
+    const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Math_Competition_Report_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // --- Render ---
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+
+  const ConnectionStatus = () => (
+    <div className={`fixed top-4 left-4 z-50 flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${!offlineMode && user ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
+      {!offlineMode && user ? <Wifi size={14}/> : <CloudOff size={14}/>}
+      {!offlineMode && user ? 'Online' : 'Offline Mode (Local Play)'}
+    </div>
+  );
+
+  if (view === 'home') return (
+    <div className="h-screen w-screen bg-orange-50 flex flex-col items-center justify-center space-y-8 p-4 overflow-hidden relative">
+      <style>{shakeStyle}</style>
+      <ConnectionStatus/>
+      <div className="text-center">
+        <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.3</h1>
+        <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
+      </div>
+      <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
+        <button onClick={() => setView('student')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-orange-200 hover:scale-105 transition-all text-center group">
+          <User size={48} className="mx-auto text-orange-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是學生</h2>
+        </button>
+        <button onClick={() => setView('teacher_login')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-indigo-200 hover:scale-105 transition-all text-center group">
+          <BarChart3 size={48} className="mx-auto text-indigo-500 mb-2 group-hover:scale-110 transition-transform"/><h2 className="text-2xl font-black text-slate-700">我是老師</h2>
+        </button>
+        <button onClick={() => setView('net_login')} className="p-10 bg-white rounded-3xl shadow-xl border-b-8 border-purple-200 hover:scale-105 transition-all text-center group">
+          <Languages size={48} className="mx-auto text-purple-500 mb-2 group-hover:scale-110 transition-transform"/>
+          <h2 className="text-2xl font-black text-slate-700">NET</h2>
+        </button>
+      </div>
+    </div>
+  );
+
+  if (view === 'student') return (
+    <div className="h-screen w-screen bg-orange-50 p-4 overflow-hidden relative">
+      <style>{shakeStyle}</style>
+      <ConnectionStatus/>
+      <div className="w-full h-full max-w-[98vw] mx-auto bg-white rounded-[2rem] shadow-xl overflow-hidden border-4 border-orange-100 flex flex-col">
+        <div className="bg-orange-500 p-4 text-white flex justify-between items-center shrink-0">
+          <button onClick={handleBackToHome}><ArrowLeft/></button>
+          <h2 className="font-bold">比賽專區 (Student Zone)</h2>
+          <div className="w-6"></div>
         </div>
-        <div className="mt-12 text-slate-400 text-sm">
-            System Ready • Connected to Firebase
+        <div className="p-6 flex-grow overflow-y-auto flex flex-col">
+           {studentView === 'class_select' && (
+            <div className="grid grid-cols-4 gap-6 h-full items-center">
+              {['3A','3B','3C','3D'].map(c => <button key={c} onClick={() => {setSelectedClass(c); setStudentView('name_select');}} className="h-64 bg-orange-50 hover:bg-orange-500 hover:text-white rounded-3xl text-6xl font-black border-4 border-orange-100 transition-colors shadow-sm">{c}</button>)}
+            </div>
+          )}
+
+          {studentView === 'name_select' && (
+            <div className="space-y-4 h-full flex flex-col">
+              <div className="flex justify-between items-center shrink-0">
+                <button onClick={() => setStudentView('class_select')} className="px-4 py-2 bg-slate-100 rounded-lg font-bold">Back</button>
+                <h3 className="text-2xl font-black">Select Name</h3>
+                <div className="w-16"></div>
+              </div>
+              <div className="grid grid-cols-4 lg:grid-cols-5 gap-3 overflow-y-auto p-2">
+                {studentsByClass[selectedClass]?.map(s => <button key={s.id} onClick={() => {setCurrentStudent(s); setStudentView('difficulty');}} className="p-4 bg-slate-50 hover:bg-orange-100 rounded-xl text-left border font-bold text-lg">{s.number}. {s.name_zh}</button>)}
+              </div>
+            </div>
+          )}
+
+          {studentView === 'difficulty' && (
+            <div className="flex-grow flex flex-col justify-center items-center space-y-6">
+              <h3 className="text-3xl font-black">選擇挑戰難度</h3>
+              {/* Added Student Info */}
+              {currentStudent && <p className="text-xl text-slate-500 font-bold">Student: {currentStudent.class} ({currentStudent.number}) {currentStudent.name_zh}</p>}
+              
+              <div className="grid grid-cols-3 gap-8 w-full max-w-6xl">
+                <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="p-12 bg-green-100 border-4 border-green-300 rounded-3xl text-3xl font-black text-green-800 hover:scale-105 transition-transform shadow-lg">
+                  初級 (Low)<br/><span className="text-lg font-bold mt-2 block">每題 5 分<br/>(扣 2 分)</span>
+                </button>
+                <button onClick={() => {setDifficulty('mid'); setStudentView('intro');}} className="p-12 bg-blue-100 border-4 border-blue-300 rounded-3xl text-3xl font-black text-blue-800 hover:scale-105 transition-transform shadow-lg">
+                  中級 (Mid)<br/><span className="text-lg font-bold mt-2 block">每題 10 分<br/>(扣 5 分)</span>
+                </button>
+                <button onClick={() => {setDifficulty('high'); setStudentView('intro');}} className="p-12 bg-purple-100 border-4 border-purple-300 rounded-3xl text-3xl font-black text-purple-800 hover:scale-105 transition-transform shadow-lg">
+                  高級 (High)<br/><span className="text-lg font-bold mt-2 block">每題 20 分<br/>(扣 10 分)</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {studentView === 'intro' && (
+            <div className="flex-grow flex flex-col justify-center items-center space-y-8">
+              <h2 className="text-7xl font-black text-slate-800">Ready?</h2>
+              <p className="text-3xl font-bold text-slate-500">5 分鐘限時挑戰！<br/>答錯 3 次會扣分喔！</p>
+              <button 
+                onClick={startGame} 
+                disabled={isStarting}
+                className={`px-20 py-8 bg-orange-500 text-white rounded-full text-5xl font-black shadow-xl hover:scale-105 transition-transform flex items-center ${isStarting ? 'opacity-75 cursor-wait' : 'animate-pulse'}`}
+              >
+                {isStarting ? <Loader2 className="animate-spin mr-3" size={48} /> : <Play size={48} fill="currentColor" className="inline mr-3"/>} 
+                {isStarting ? "STARTING..." : "START"}
+              </button>
+            </div>
+          )}
+
+          {studentView === 'play' && (
+            !currentQuestion ? (
+              <div className="flex-grow flex items-center justify-center">
+                <Loader2 className="animate-spin text-orange-500" size={64} />
+              </div>
+            ) : (
+              <div className="flex flex-row gap-6 h-full items-stretch">
+                <div className="w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
+                  {/* Name Display */}
+                  <div className="absolute top-4 left-6 text-slate-400 font-bold text-xl">
+                    {currentStudent.class} ({currentStudent.number}) {currentStudent.name_zh}
+                  </div>
+                  {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
+                  
+                  {/* Question */}
+                  <p className="text-4xl lg:text-6xl font-bold text-slate-800 text-center leading-tight px-4">{currentQuestion.q}</p>
+                </div>
+
+                <div className="w-1/3 flex flex-col gap-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-rose-100 p-4 rounded-2xl flex flex-col items-center justify-center text-rose-700">
+                      <Timer size={32} className="mb-1"/>
+                      <span className="text-3xl font-black">{Math.floor(timeLeft/60)}:{String(timeLeft%60).padStart(2,'0')}</span>
+                      <span className="text-xs font-bold">Time (時間)</span>
+                    </div>
+                    <div className="bg-orange-100 p-4 rounded-2xl flex flex-col items-center justify-center text-orange-700">
+                      <Coins size={32} className="mb-1"/>
+                      <span className="text-3xl font-black">{totalAccumulatedScore}</span>
+                      <span className="text-xs font-bold">Total (累積)</span>
+                    </div>
+                  </div>
+
+                  {/* NEW: Student Stats Display */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-green-50 p-2 rounded-xl flex items-center justify-center gap-2 text-green-700 border border-green-200">
+                      <CheckCircle2 size={20}/>
+                      <span className="font-black text-xl">{sessionCorrect}</span>
+                    </div>
+                    <div className="bg-red-50 p-2 rounded-xl flex items-center justify-center gap-2 text-red-700 border border-red-200">
+                      <XCircle size={20}/>
+                      <span className="font-black text-xl">{sessionWrong}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 flex items-center justify-center min-h-[80px]">
+                     {feedback && <div className={`w-full p-4 rounded-2xl text-center font-black text-xl animate-bounce ${feedback.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{feedback.msg}</div>}
+                  </div>
+
+                  <form onSubmit={submitAnswer} className="flex flex-col gap-4">
+                    <input 
+                      type="number" 
+                      autoFocus 
+                      value={answer} 
+                      onChange={e => setAnswer(e.target.value)} 
+                      className={`w-full p-6 rounded-2xl border-4 text-5xl text-center font-black outline-none transition-all shadow-sm ${shake ? 'animate-shake border-red-400 bg-red-50' : 'border-slate-300 focus:border-orange-500'}`} 
+                      placeholder="?"
+                    />
+                    <button type="submit" className="w-full py-8 bg-slate-800 text-white rounded-2xl font-black text-4xl hover:bg-black transition-colors shadow-lg active:scale-95">提交 (GO)</button>
+                  </form>
+                </div>
+              </div>
+            )
+          )}
+
+          {studentView === 'result' && (
+            <div className="h-full flex flex-col justify-center items-center space-y-8 animate-in zoom-in">
+              <Trophy size={100} className="text-yellow-400 mx-auto drop-shadow-lg"/>
+              <h2 className="text-5xl font-black">時間到！</h2>
+              <div className="grid grid-cols-2 gap-8 w-full max-w-2xl">
+                <div className="p-8 bg-slate-50 rounded-3xl border shadow-sm text-center">
+                  <p className="text-sm text-slate-400 font-bold mb-2">本局得分</p>
+                  <p className="text-5xl font-black text-slate-700">{sessionScore}</p>
+                </div>
+                <div className="p-8 bg-orange-50 rounded-3xl border-2 border-orange-200 shadow-sm text-center">
+                  <p className="text-sm text-orange-400 font-bold mb-2">累積總分</p>
+                  <p className="text-5xl font-black text-orange-600">{totalAccumulatedScore}</p>
+                </div>
+              </div>
+              <button onClick={handlePlayAgain} className="px-16 py-6 bg-slate-800 text-white rounded-2xl font-black text-2xl hover:bg-black transition-colors shadow-lg flex items-center gap-3">
+                <RotateCcw size={28}/> 再次挑戰 (Play Again)
+              </button>
+              <button onClick={handleBackToHome} className="text-slate-400 font-bold underline text-lg">完全登出 (Logout)</button>
+            </div>
+          )}
         </div>
       </div>
-    );
-  }
+    </div>
+  );
 
-  // 2. Student Selection (Wide Layout Restored)
-  if (view === 'student_select') {
-    return (
-      <div className="min-h-screen bg-slate-50 p-6">
-        <header className="max-w-7xl mx-auto mb-8 flex items-center justify-between">
-            <button onClick={() => setView('landing')} className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 font-bold">
-                <ArrowLeft /> 返回首頁
+  if (view === 'net_login') return (
+    <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
+      <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
+        <h2 className="text-3xl font-black">NET Login</h2>
+        <input type="password" value={netPwd} onChange={e => setNetPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
+        <button onClick={() => { if(netPwd === NET_PWD) setView('net_select_shop'); else alert('Wrong Password'); }} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-bold text-xl hover:bg-purple-700">Enter</button>
+        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
+      </div>
+    </div>
+  );
+
+  if (view === 'net_select_shop') return (
+    <div className="w-screen h-screen bg-purple-50 flex items-center justify-center p-4">
+      <div className="max-w-4xl w-full text-center space-y-8">
+        <h2 className="text-4xl font-black text-purple-900">Select Your Shop</h2>
+        <div className="grid grid-cols-3 gap-6">
+          {SHOPS.map(shop => (
+            <button key={shop.id} onClick={() => { setSelectedShop(shop); setView('net_dashboard'); }} className={`p-10 rounded-3xl border-4 ${shop.borderColor} ${shop.lightColor} hover:scale-105 transition-transform shadow-lg group`}>
+              <h3 className={`text-3xl font-black ${shop.textColor} mb-2`}>{shop.name_en}</h3>
+              <p className="font-bold text-slate-500">{shop.name_zh}</p>
+              <div className={`mt-4 inline-block px-4 py-2 rounded-xl text-white font-bold text-xl ${shop.color}`}>Rate: x{shop.rate}</div>
             </button>
-            <h2 className="text-3xl font-black text-indigo-700">選擇你的名字</h2>
-            <div className="w-24"></div> 
-        </header>
-
-        {/* Class Tabs */}
-        <div className="max-w-7xl mx-auto mb-8 flex gap-4 overflow-x-auto pb-2">
-            {['3A','3B','3C','3D'].map(cls => (
-                <button 
-                    key={cls}
-                    onClick={() => setSelectedClass(cls)}
-                    className={`px-8 py-4 rounded-2xl text-xl font-bold transition-all shadow-sm
-                    ${selectedClass === cls 
-                        ? 'bg-indigo-600 text-white scale-105 shadow-indigo-200' 
-                        : 'bg-white text-slate-400 hover:bg-slate-100'}`}
-                >
-                    {cls}
-                </button>
-            ))}
+          ))}
         </div>
-
-        {/* Grid Area - Using max-w-7xl for width */}
-        <div className="max-w-7xl mx-auto">
-            {filteredStudents.length === 0 ? (
-                <div className="bg-white rounded-3xl p-12 text-center text-slate-400 border-2 border-dashed border-slate-200">
-                    <p className="text-xl">暫無資料，請老師先匯入名單。</p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {filteredStudents.map(s => (
-                        <button
-                            key={s.id}
-                            onClick={() => { setSelectedStudent(s); setView('game'); }}
-                            className="bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-indigo-400 hover:shadow-lg transition-all flex flex-col items-center gap-2"
-                        >
-                            <div className="w-12 h-12 bg-indigo-50 text-indigo-700 rounded-full flex items-center justify-center font-black text-xl">
-                                {s.number}
-                            </div>
-                            <div className="text-center">
-                                <div className="font-bold text-slate-700 text-lg">{s.name}</div>
-                                <div className="text-xs text-slate-400 font-mono mt-1">💎 {s.score}</div>
-                            </div>
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
+        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
       </div>
-    );
-  }
+    </div>
+  );
 
-  // 3. Teacher Dashboard (With Import Function)
-  if (view === 'teacher') {
-    return (
-      <div className="min-h-screen bg-slate-100 p-8">
-        <div className="max-w-6xl mx-auto">
-            <header className="flex justify-between items-center mb-10">
-                <h1 className="text-3xl font-black text-slate-800 flex items-center gap-3">
-                    <Settings className="text-emerald-600" size={32}/> 
-                    教師後台
-                </h1>
-                <button onClick={() => setView('landing')} className="bg-white px-6 py-2 rounded-lg font-bold text-slate-600 shadow-sm hover:bg-slate-50">
-                    登出
-                </button>
-            </header>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Stats Card */}
-                <div className="bg-white p-8 rounded-3xl shadow-sm">
-                    <h3 className="text-xl font-bold text-slate-700 mb-6 flex items-center gap-2">
-                        <Users size={20}/> 學生概況
-                    </h3>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="p-4 bg-indigo-50 rounded-2xl text-center">
-                            <div className="text-4xl font-black text-indigo-600 mb-1">{allStudents.length}</div>
-                            <div className="text-xs font-bold text-indigo-400 uppercase">總人數</div>
-                        </div>
-                        <div className="p-4 bg-emerald-50 rounded-2xl text-center">
-                             <div className="text-4xl font-black text-emerald-600 mb-1">
-                                {allStudents.reduce((acc, s) => acc + (s.score || 0), 0)}
-                             </div>
-                             <div className="text-xs font-bold text-emerald-400 uppercase">總積分</div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Import Tool */}
-                <div className="bg-white p-8 rounded-3xl shadow-sm border-l-8 border-indigo-500">
-                    <h3 className="text-xl font-bold text-slate-700 mb-4 flex items-center gap-2">
-                        <FileUp size={20} className="text-indigo-600"/> 名單管理 (CSV)
-                    </h3>
-                    
-                    <div className="bg-blue-50 p-4 rounded-xl text-sm text-blue-900 mb-6 flex items-start gap-3">
-                        <AlertCircle className="shrink-0 mt-0.5" size={18}/>
+  if (view === 'net_dashboard' && selectedShop) return (
+    <div className="h-screen w-screen bg-slate-100 p-4 font-sans overflow-hidden">
+      <div className="w-full h-full max-w-[98vw] mx-auto flex flex-col">
+        <div className={`flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0 border-l-8 ${selectedShop.borderColor}`}>
+          <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-xl text-white ${selectedShop.color}`}><Store size={32}/></div>
+            <div>
+              <h2 className={`text-3xl font-black ${selectedShop.textColor}`}>{selectedShop.name_en} - Dashboard</h2>
+              <p className="text-slate-400 font-bold">Exchange Rate: ${selectedShop.rate} HKD / Coin</p>
+            </div>
+          </div>
+          <div className="flex gap-4">
+             <button onClick={handleResetRedemptionsOnly} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
+              <RotateCcw size={20}/> 重設所有兌換
+            </button>
+            <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
+          </div>
+        </div>
+        <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
+          {['3A','3B','3C','3D'].map(cls => (
+            <div key={cls} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
+              <h3 className="font-black text-2xl text-slate-700 mb-4 border-b pb-4 text-center">{cls}</h3>
+              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+                {liveData.filter(d => d.class === cls).map(s => {
+                  const hkd = s.score * selectedShop.rate;
+                  return (
+                    <div key={s.id} className={`p-3 rounded-xl border-2 flex flex-col gap-2 ${s.redeemed ? 'bg-green-50 border-green-200 opacity-60' : 'bg-white border-slate-100'}`}>
+                      <div className="flex justify-between items-center">
                         <div>
-                            <p className="font-bold mb-1">匯入操作將會覆蓋現有資料庫！</p>
-                            <p>請上載包含 3A-3D 所有學生的完整 CSV 檔案。</p>
-                            <p className="mt-1 opacity-70 text-xs font-mono">Column D:班別 | Column E:班號 | Column H:姓名</p>
+                          <span className="font-bold text-md block text-slate-800">{s.number}. {s.name}</span>
+                          <div className="flex gap-3 text-xs mt-1">
+                            <span className="font-bold text-orange-500"><Coins size={10} className="inline mr-1"/>{s.score}</span>
+                            <span className={`font-black ${selectedShop.textColor}`}>${hkd}</span>
+                          </div>
                         </div>
-                    </div>
-
-                    <div className="flex gap-3">
-                        <input 
-                            type="file" 
-                            accept=".csv"
-                            ref={fileInputRef}
-                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                        />
                         <button 
-                            onClick={(e) => fileInputRef.current && handleImportCSV({ target: fileInputRef.current })}
-                            disabled={isUploading}
-                            className={`px-6 py-2 rounded-lg font-bold text-white shadow-md whitespace-nowrap flex items-center gap-2
-                                ${isUploading ? 'bg-slate-400' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                          onClick={() => toggleRedeem(s, s.redeemed)} 
+                          className={`p-2 rounded-lg transition-colors ${
+                            s.redeemed 
+                              ? 'bg-green-100 text-green-600 hover:bg-red-100 hover:text-red-600' 
+                              : `${selectedShop.lightColor} hover:bg-slate-200`
+                          }`}
+                          title={s.redeemed ? "Click to Undo (撤銷)" : "Click to Redeem (兌換)"}
                         >
-                            {isUploading ? '匯入中...' : '匯入'} <Upload size={16}/>
+                          {s.redeemed ? <CheckCircle2 size={20}/> : <Check size={20} className={selectedShop.textColor}/>}
                         </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 4. NET View (Simple placeholder as per request)
-  if (view === 'net') {
-    return (
-        <div className="min-h-screen bg-orange-50 flex flex-col items-center justify-center p-8 text-center">
-             <h1 className="text-4xl font-black text-orange-600 mb-4">English Zone</h1>
-             <p className="text-slate-600 text-xl mb-8">Welcome, NET Teacher! Students are speaking English today.</p>
-             <button onClick={() => setView('landing')} className="px-8 py-3 bg-white text-orange-600 font-bold rounded-full shadow-lg">Back</button>
-        </div>
-    );
-  }
-
-  // 5. Game View (Existing Logic)
-  if (view === 'game' && selectedStudent) {
-    return (
-      <div className="min-h-screen bg-indigo-50 p-6 flex flex-col items-center">
-         <header className="w-full max-w-2xl flex justify-between items-center mb-8 bg-white p-4 rounded-2xl shadow-sm">
-            <div className="flex items-center gap-4">
-                <button onClick={() => setView('student_select')} className="text-slate-400 hover:text-indigo-600"><ArrowLeft/></button>
-                <div>
-                    <h2 className="font-bold text-xl text-slate-800">{selectedStudent.number}. {selectedStudent.name}</h2>
-                    <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{selectedStudent.className}</span>
-                </div>
-            </div>
-            <div className="flex items-center gap-2">
-                <Coins className="text-yellow-500 fill-yellow-500" />
-                <span className="text-2xl font-black text-slate-700">{selectedStudent.score || 0}</span>
-            </div>
-         </header>
-
-         <main className="w-full max-w-2xl">
-            {!question ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <button onClick={() => { setQuestion(generateQuestion('basic')); setInputAns(''); setFeedback(null); }} className="h-32 bg-white rounded-2xl shadow-sm border-b-4 border-indigo-100 hover:border-indigo-400 flex flex-col items-center justify-center gap-2 transition-all">
-                        <span className="text-3xl">💰</span>
-                        <span className="font-bold text-slate-600">基礎理財</span>
-                    </button>
-                    <button onClick={() => { setQuestion(generateQuestion('shopping')); setInputAns(''); setFeedback(null); }} className="h-32 bg-white rounded-2xl shadow-sm border-b-4 border-emerald-100 hover:border-emerald-400 flex flex-col items-center justify-center gap-2 transition-all">
-                        <span className="text-3xl">🛒</span>
-                        <span className="font-bold text-slate-600">購物找換</span>
-                    </button>
-                    <button onClick={() => { setQuestion(generateQuestion('time')); setInputAns(''); setFeedback(null); }} className="h-32 bg-white rounded-2xl shadow-sm border-b-4 border-purple-100 hover:border-purple-400 flex flex-col items-center justify-center gap-2 transition-all">
-                        <span className="text-3xl">⏰</span>
-                        <span className="font-bold text-slate-600">時間管理</span>
-                    </button>
-                 </div>
-            ) : (
-                <div className="bg-white rounded-3xl shadow-xl p-8 text-center relative overflow-hidden">
-                    <button onClick={() => setQuestion(null)} className="absolute top-6 left-6 text-slate-300 hover:text-slate-600"><ArrowLeft/></button>
-                    
-                    <div className="mt-8 mb-8">
-                        <h3 className="text-2xl md:text-3xl font-bold text-slate-800 leading-normal">{question.text}</h3>
-                    </div>
-
-                    <div className="flex justify-center items-end gap-3 mb-10">
-                        <input 
-                            type="number" 
-                            value={inputAns}
-                            onChange={(e) => setInputAns(e.target.value)}
-                            className="w-40 border-b-4 border-indigo-100 text-center text-4xl font-black text-indigo-600 focus:outline-none focus:border-indigo-400 transition-all pb-2"
-                            placeholder="?"
-                            autoFocus
-                        />
-                        <span className="text-xl font-bold text-slate-400 mb-3">{question.unit}</span>
-                    </div>
-
-                    {!feedback ? (
-                        <button onClick={submitAnswer} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-xl hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all">
-                            提交
-                        </button>
-                    ) : (
-                        <div className={`p-6 rounded-2xl animate-pulse ${feedback === 'correct' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                            <div className="text-2xl font-black mb-2">{feedback === 'correct' ? '答對了！' : '再試一次'}</div>
-                            {feedback === 'correct' && <div className="text-sm font-bold opacity-75">+10 寶石</div>}
-                            <button onClick={() => setQuestion(null)} className="mt-4 px-6 py-2 bg-white rounded-full text-sm font-bold shadow-sm opacity-90 hover:opacity-100">繼續挑戰</button>
+                      </div>
+                      
+                      {/* REDEMPTION LOG DISPLAY */}
+                      {s.lastLog && (
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1 border-t pt-1 mt-1">
+                          <History size={10} />
+                          <span className="truncate">{s.lastLog}</span>
                         </div>
-                    )}
-                </div>
-            )}
-         </main>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-    );
-  }
+    </div>
+  );
+
+  if (view === 'teacher_login') return (
+    <div className="w-screen h-screen bg-indigo-50 flex items-center justify-center p-4">
+      <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center space-y-6">
+        <h2 className="text-3xl font-black">老師後台</h2>
+        <input type="password" value={teacherPwd} onChange={e => setTeacherPwd(e.target.value)} className="w-full p-5 border-2 rounded-2xl text-center text-xl" placeholder="Password"/>
+        <button onClick={() => { if(teacherPwd === TEACHER_PWD) setView('teacher'); else alert('密碼錯誤 (Wrong Password)'); }} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold text-xl hover:bg-indigo-700">Login</button>
+        <button onClick={() => setView('home')} className="text-slate-400 font-bold">Back</button>
+      </div>
+    </div>
+  );
+
+  if (view === 'teacher') return (
+    <div className="h-screen w-screen bg-slate-100 p-4 font-sans overflow-hidden">
+      <div className="w-full h-full max-w-[98vw] mx-auto flex flex-col">
+        <div className="flex justify-between items-center mb-4 bg-white p-6 rounded-3xl shadow-sm shrink-0">
+          <h2 className="text-3xl font-black text-indigo-700 flex items-center gap-3"><BarChart3 size={32}/> 實時監察 (Live Monitor)</h2>
+          <div className="flex gap-4">
+            {/* CSV DOWNLOAD BUTTON */}
+            <button onClick={downloadCSV} className="flex items-center gap-2 bg-green-100 text-green-700 px-4 py-3 rounded-xl font-bold hover:bg-green-200 transition-colors">
+              <FileDown size={20}/> 下載報表 (CSV)
+            </button>
+            <button onClick={handleResetAll} className="flex items-center gap-2 bg-red-100 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-200 transition-colors">
+              <RotateCcw size={20}/> 重設所有分數
+            </button>
+            <button onClick={() => setView('home')} className="bg-slate-100 p-3 rounded-xl text-slate-500 hover:bg-slate-200"><LogOut/></button>
+          </div>
+        </div>
+        <div className="flex-grow grid grid-cols-4 gap-6 overflow-hidden">
+          {['3A','3B','3C','3D'].map(cls => (
+            <div key={cls} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
+              <h3 className="font-black text-2xl text-slate-700 mb-4 border-b pb-4 text-center">{cls}</h3>
+              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+                {liveData.filter(d => d.class === cls).map(s => (
+                  <div key={s.id} className={`p-3 rounded-xl border-2 flex justify-between items-center ${s.redeemed ? 'bg-green-50 border-green-200' : 'bg-white border-slate-100'}`}>
+                    <div>
+                      <span className="font-bold text-md block">{s.number}. {s.name}</span>
+                      <span className="text-xs text-slate-400 font-bold">{s.status === 'playing' ? '🔥 Playing' : (s.redeemed ? '✅ Done' : '⭕ Waiting')}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {editingId === s.id ? (
+                        <div className="flex gap-2">
+                          <input type="number" className="w-16 border rounded p-1 text-center font-bold" value={editScoreVal} onChange={e => setEditScoreVal(e.target.value)} />
+                          <button onClick={() => saveEdit(s.id)}><Save size={20} className="text-blue-600"/></button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="font-black text-xl text-indigo-600">{s.score}</span>
+                          <button onClick={() => { setEditingId(s.id); setEditScoreVal(s.score); }}><Edit size={16} className="text-slate-300 hover:text-indigo-500"/></button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 
   return <div>Loading...</div>;
-}
+};
 
 export default App;
