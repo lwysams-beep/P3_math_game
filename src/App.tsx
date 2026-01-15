@@ -1,11 +1,11 @@
 // @ts-nocheck
-// P.3 理財數學王 v6.2 (Curriculum-Based Diverse Word Problems)
+// P.3 理財數學王 v6.3 (Student List with Numbers)
 // Date: 2026-01-14
 // Fixes: 
-// 1. "High" Difficulty massively expanded beyond money.
-// 2. Added Curriculum Topics: Length (cm/m), Weight (g/kg), General Quantity, Leftover Logic.
-// 3. Implemented 9 distinct question subtypes with strict no-repeat logic.
-// 4. Retained all previous features (Data, Admin, Offline mode).
+// 1. Updated RAW_CSV_DATA with full class list from "StuInfo_All(3A,3B,3C,3D).csv".
+// 2. Updated CSV parsing logic to extract Class Number (Col E/Index 4).
+// 3. Student selection list now sorted by Class Number.
+// 4. Display format changed to: "1. 陳大文" (Number. Name).
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -49,7 +49,6 @@ const SHOPS = [
 ];
 
 // --- 3. Smart Question Generator (v6.2 Logic) ---
-
 const ITEMS_DB = [
   { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
   { name: '擦膠', unit: '塊' }, { name: '鉛筆', unit: '枝' }, { name: '原子筆', unit: '枝' },
@@ -65,29 +64,23 @@ const ITEMS_DB = [
 const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
 const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-// --- GENERATOR FUNCTION ---
 const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) => {
   let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
   let signature = "";
-  let subType = ""; // To track specific word problem types
+  let subType = "";
   let attempts = 0;
 
-  // Pattern for Low/Mid: 2 Calc, 1 App
   const isAppTurn = (questionIndex % 3 === 0); 
   
   do {
     attempts++;
     const rand = Math.random();
 
-    // ==========================================
-    // LOW DIFFICULTY
-    // ==========================================
     if (difficulty === 'low') {
       score = 5; penalty = 2;
       
       if (!isAppTurn) { 
         if (rand < 0.5) {
-          // 2-digit Mul (12-49 x 2-6)
           const n1 = randomInt(12, 49); 
           const n2 = randomInt(2, 6);   
           q = `${n1} × ${n2} = ?`;
@@ -97,7 +90,6 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
           subType = 'calc_mul';
           signature = `mul-${n1}-${n2}`;
         } else {
-          // Division (Quotient 12-19)
           const ans = randomInt(12, 19); 
           const n2 = randomInt(2, 5);    
           const total = ans * n2;
@@ -109,7 +101,6 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
           signature = `div-${total}-${n2}`;
         }
       } else { 
-        // Word Problem
         const item = getRandomItem();
         const count = randomInt(2, 5); 
         const price = randomInt(12, 25); 
@@ -127,16 +118,11 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
         signature = `app-${price}-${count}`;
       }
     } 
-    
-    // ==========================================
-    // MID DIFFICULTY
-    // ==========================================
     else if (difficulty === 'mid') {
       score = 10; penalty = 5;
       
       if (!isAppTurn) { 
         if (rand < 0.5) {
-          // Harder 2-digit Mul
           const n1 = randomInt(35, 95); 
           const n2 = randomInt(3, 8);   
           q = `${n1} × ${n2} = ?`;
@@ -146,7 +132,6 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
           subType = 'calc_mul';
           signature = `mul-${n1}-${n2}`;
         } else {
-          // Harder Division
           let ans;
           do { ans = randomInt(13, 35); } while (ans % 10 === 0 || ans % 11 === 0);
           const n2 = randomInt(3, 7);    
@@ -162,7 +147,7 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
         const item = getRandomItem();
         const tpl = randomInt(1, 3);
         
-        if (tpl === 1) { // Shopping
+        if (tpl === 1) { 
             const count = randomInt(4, 9);
             const price = randomInt(15, 45);
             q = `老師買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
@@ -170,7 +155,7 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
             hint = `總金額 = 單價 × 數量。`;
             subType = 'app_shopping';
             signature = `app-${price}-${count}`;
-        } else if (tpl === 2) { // Sharing
+        } else if (tpl === 2) { 
             const total = randomInt(40, 90);
             const perPerson = randomInt(3, 8);
             const grandTotal = total - (total % perPerson); 
@@ -179,7 +164,7 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
             hint = `關鍵字是「平均分」，這代表要用除法。`;
             subType = 'app_sharing';
             signature = `app-${grandTotal}-${perPerson}`;
-        } else { // Savings
+        } else { 
             const days = randomInt(5, 9);
             const saving = randomInt(12, 25);
             q = `小美每天儲蓄 $${saving}，${days} 天後她共儲蓄了多少元？`;
@@ -191,21 +176,15 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
         category = 'app';
       }
     } 
-    
-    // ==========================================
-    // HIGH DIFFICULTY (DIVERSE CURRICULUM WORD PROBLEMS)
-    // ==========================================
     else { 
       score = 20; penalty = 10;
-      category = 'app'; // All are applications
+      category = 'app'; 
 
-      // Expanded types: 4 Money + 5 Non-Money
       const HIGH_TYPES = [
-          'shopping', 'change', 'mixed_money', 'savings', // Money
-          'length', 'weight', 'general_mul', 'general_div', 'leftover' // Non-Money
+          'shopping', 'change', 'mixed_money', 'savings', 
+          'length', 'weight', 'general_mul', 'general_div', 'leftover' 
       ];
       
-      // Ensure we don't repeat the exact same TYPE of problem
       const availableTypes = HIGH_TYPES.filter(t => t !== lastType);
       const chosenType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
       
@@ -213,7 +192,6 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
 
       const item = getRandomItem();
 
-      // --- MONEY TYPES ---
       if (chosenType === 'shopping') {
           const count = randomInt(6, 15);
           const price = randomInt(45, 120);
@@ -258,9 +236,8 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
           signature = `high-save-${weeklySaving}-${weeks}`;
       }
 
-      // --- NON-MONEY TYPES (CURRICULUM BASED) ---
       else if (chosenType === 'length') {
-          const len = randomInt(15, 45); // cm
+          const len = randomInt(15, 45); 
           const count = randomInt(4, 9);
           q = `一條絲帶長 ${len} 厘米，老師買了 ${count} 條，共有多少厘米？`;
           a = len * count;
@@ -268,7 +245,7 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
           signature = `high-len-${len}-${count}`;
 
       } else if (chosenType === 'weight') {
-          const weight = randomInt(120, 250); // g
+          const weight = randomInt(120, 250); 
           const count = randomInt(3, 6);
           q = `一個蘋果重 ${weight} 克，${count} 個蘋果共重多少克？`;
           a = weight * count;
@@ -284,7 +261,7 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
           signature = `high-gen-mul-${booksPerShelf}-${shelves}`;
 
       } else if (chosenType === 'general_div') {
-          const totalItems = randomInt(15, 60) * 5; // e.g., 75, 100
+          const totalItems = randomInt(15, 60) * 5; 
           const boxes = 5;
           q = `工廠生產了 ${totalItems} 塊餅乾，平均裝入 ${boxes} 個罐子，每罐有多少塊？`;
           a = totalItems / boxes;
@@ -307,103 +284,103 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
   return { q, a, score, penalty, difficulty, hint, category, signature, subType };
 };
 
-// CSV Data 
-const RAW_CSV_DATA = `學生註冊編號,學年,級別,班別代碼,25_P3_Class,25_P3_Class 英數,25_託管,班號,學生編號,英文姓名,中文姓名
-#W23083,2025,P3,3A,3A,3A,,1,S9014979,CHAN SHEUNG KI,陳尚頎
-#W23126,2025,P3,3A,3A,3A,,2,S9198301,CHU HOI TUNG,朱凱彤
-#W23084,2025,P3,3A,3A,3A,,3,S9089944,CHUNG CHEUK LAM,鍾焯琳
-#W23005,2025,P3,3A,3A,3A,,4,S9024095,HAN JIAYING,韓佳穎
-#W23024,2025,P3,3A,3A,3A,,5,S9018699,HO CHEUK HIM,何卓謙
-#W23007,2025,P3,3A,3A,3A,,6,S9055810,KWOK SUM YU,郭芯妤
-#W23010,2025,P3,3A,3A,3A,,7,S9034260,LAM HEI MAN,林希蔓
-#W23030,2025,P3,3A,3A,3A,,8,S8979113,LAU PAK YIN,劉柏言
-#W23011,2025,P3,3A,3A,3A,,9,S9037464,LAU HIU YAU,劉曉悠
-#W23013,2025,P3,3A,3A,3A,,10,S9034503,LEE CHEUK NAM,李卓楠
-#W23014,2025,P3,3A,3A,3A,,11,S9030001,LEUNG TSZ CHING,梁梓晴
-#W23012,2025,P3,3A,3A,3A,,12,S9035119,LI KA LAM,李佳琳
-#W23061,2025,P3,3A,3A,3A,,13,S9150198,LUNG KA HAI,龍嘉熙
-#W23063,2025,P3,3A,3A,3A,,14,S8986527,MAN PAK HEI,文柏曦
-#W23017,2025,P3,3A,3A,3A,,15,S9034872,NG YUE FEI,吳雨霏
-#W23145,2025,P3,3A,3A,3A,,16,S9356349,POON HO HIN,潘浩軒
-#W23046,2025,P3,3A,3A,3A,,17,S8991444,SHAM CHEUK FUNG,岑卓峰
-#W23018,2025,P3,3A,3A,3A,,18,S9027981,TAI KA HEI,戴嘉希
-#W23047,2025,P3,3A,3A,3A,,19,S9047214,TAM KA YING,譚嘉瑩
-#W23019,2025,P3,3A,3A,3A,,20,S9014529,TO CHEUK WING,杜卓穎
-#W23020,2025,P3,3A,3A,3A,,21,S9034376,WONG TSZ YAU,王梓悠
-#W23050,2025,P3,3A,3A,3A,,22,S8977536,WONG CHUN HEI,黃俊熙
-#W23149,2025,P3,3A,3A,3A,,23,S9369068,WONG NGA LAM,黃雅琳
-#W23021,2025,P3,3A,3A,3A,,24,S9024044,YEUNG TSZ YUET,楊子悅
-#W23022,2025,P3,3A,3A,3A,,25,S9024036,ZHOU HAOYU,周浩宇
-#W23086,2025,P3,3B,3B,3B,,1,S9043324,CHAU YUK KIU,周鈺翹
-#W23025,2025,P3,3B,3B,3B,,2,S9042263,CHENG KA SHING,鄭嘉誠
-#W23088,2025,P3,3B,3B,3B,,3,S9050071,CHEUNG YIN TING,張賢廷
-#W23004,2025,P3,3B,3B,3B,,4,S9044959,FONG MAN HEI,方雯晞
-#W23091,2025,P3,3B,3B,3B,,5,S9034228,HO YU KI,何宇淇
-#W23093,2025,P3,3B,3B,3B,,6,S9065360,KO KWAN NGAI,高鈞毅
-#W23008,2025,P3,3B,3B,3B,,7,S9029968,KWOK TSZ YING,郭梓盈
-#W23094,2025,P3,3B,3B,3B,,8,S9061004,LAM YUET NAM,林悅楠
-#W23032,2025,P3,3B,3B,3B,,9,S9014499,LAU YAN TUNG,劉恩彤
-#W23034,2025,P3,3B,3B,3B,,10,S9011708,LEE CHUN YIN,李俊賢
-#W23036,2025,P3,3B,3B,3B,,11,S9024079,LEUNG CHUN SING,梁振聲
-#W23038,2025,P3,3B,3B,3B,,12,S9029933,LEUNG KA KI,梁嘉麒
-#W23015,2025,P3,3B,3B,3B,,13,S9044932,LEUNG WING CHIN,梁詠展
-#W23041,2025,P3,3B,3B,3B,,14,S8977528,LI SUM YAU,李芯悠
-#W23099,2025,P3,3B,3B,3B,,15,S9035089,LIU CHAK TO,廖澤滔
-#W23062,2025,P3,3B,3B,3B,,16,S9148452,LUI HOI YAU,雷凱悠
-#W23102,2025,P3,3B,3B,3B,,17,S9034295,MAN CHAK SING,文澤承
-#W23016,2025,P3,3B,3B,3B,,18,S9044398,NG KA YEE,吳嘉怡
-#W23067,2025,P3,3B,3B,3B,,19,S9044436,PANG CHIT LONG,彭哲朗
-#W23103,2025,P3,3B,3B,3B,,20,S9044355,SIU TSZ KI,蕭芷淇
-#W23048,2025,P3,3B,3B,3B,,21,S9011686,TSANG CHUN HEI,曾進希
-#W23049,2025,P3,3B,3B,3B,,22,S9042212,WAN PAK KIU,溫柏翹
-#W23105,2025,P3,3B,3B,3B,,23,S9042271,WONG HO TIN,黃浩天
-#W23106,2025,P3,3B,3B,3B,,24,S9037499,WONG YAN TING,黃欣婷
-#W23107,2025,P3,3B,3B,3B,,25,S9037480,XIE TSZ LAM,謝芷琳
-#W23026,2025,P3,3C,3C,3C,,1,S9018656,CHAN CHUN YIN,陳俊賢
-#W23121,2025,P3,3C,3C,3C,,2,S9205103,CHENG SUM YUET,鄭心悅
-#W23028,2025,P3,3C,3C,3C,,3,S9014561,CHIU CHUN KIT,趙俊傑
-#W23090,2025,P3,3C,3C,3C,,4,S9044991,FAN CHEUK KAN,范卓勤
-#W23006,2025,P3,3C,3C,3C,,5,S9044924,IP TIN LONG,葉天朗
-#W23131,2025,P3,3C,3C,3C,,6,S9221168,KEUNG YAN TUNG,姜欣彤
-#W23132,2025,P3,3C,3C,3C,,7,S9231457,KWOK KWAN LAM,郭君臨
-#W23009,2025,P3,3C,3C,3C,,8,S9029951,KWONG TSZ KIU,鄺芷蕎
-#W23031,2025,P3,3C,3C,3C,,9,S9014545,LAU TIN LONG,劉天朗
-#W23033,2025,P3,3C,3C,3C,,10,S9011708,LAW CHUN CHING,羅俊政
-#W23035,2025,P3,3C,3C,3C,,11,S9024087,LEE HOI CHING,李海晴
-#W23037,2025,P3,3C,3C,3C,,12,S9029941,LEE TSZ LAM,李芷琳
-#W23039,2025,P3,3C,3C,3C,,13,S9035097,LI CHEUK HEI,李卓熹
-#W23040,2025,P3,3C,3C,3C,,14,S8977501,LIU TSZ CHUNG,廖梓聰
-#W23137,2025,P3,3C,3C,3C,,15,S9255011,LUK CHI YEUNG,陸志揚
-#W23043,2025,P3,3C,3C,3C,,16,S8986519,MA SHU SUM,馬樹森
-#W23044,2025,P3,3C,3C,3C,,17,S8987760,MAK KA PO,麥嘉寶
-#W23045,2025,P3,3C,3C,3C,,18,S8987779,MIAO HO FUNG,繆浩峰
-#W23138,2025,P3,3C,3C,3C,,19,S9255021,MUI TSZ TO,梅子滔
-#W23066,2025,P3,3C,3C,3C,,20,S9037430,NGAN WING KEI,顏詠琪
-#W23143,2025,P3,3C,3C,3C,,21,S9318854,SIN CHEUK LAM,冼卓琳
-#W23051,2025,P3,3C,3C,3C,,22,S8979148,WONG HEI NAM,黃希楠
-#W23052,2025,P3,3C,3C,3C,,23,S8979130,WONG HIU YAN,黃曉欣
-#W23108,2025,P3,3C,3C,3C,,24,S9043286,YU CHUN HEI,余俊希
-#W23109,2025,P3,3C,3C,3C,,25,S9043294,ZHAO YAN LONG,趙言朗
-#W23110,2025,P3,3D,3D,3D,,1,S9042220,AU-YEUNG SUM YUET,歐陽心悅
-#W23001,2025,P3,3D,3D,3D,,2,S9018672,CHAN CHUN HO,陳俊豪
-#W23002,2025,P3,3D,3D,3D,,3,S9024052,CHAN CHUN HEI,陳俊熙
-#W23085,2025,P3,3D,3D,3D,,4,S9029984,CHAN HEI NGAI,陳希毅
-#W23111,2025,P3,3D,3D,3D,,5,S9037449,CHAN HEI WING,陳晞穎
-#W23027,2025,P3,3D,3D,3D,,6,S9014537,CHEN JIAYING,陳嘉盈
-#W23122,2025,P3,3D,3D,3D,,7,S9205111,CHENG TAI MING,鄭泰明
-#W23124,2025,P3,3D,3D,3D,,8,S9198328,CHEUNG KWAN TO,張鈞陶
-#W23003,2025,P3,3D,3D,3D,,9,S9014510,CHOW KA KEI,周嘉琪
-#W23089,2025,P3,3D,3D,3D,,10,S9043308,CHOW SZE CHAI,周斯齊
-#W23127,2025,P3,3D,3D,3D,,11,S9205146,CHU CHI HIN,朱智軒
-#W23092,2025,P3,3D,3D,3D,,12,S9034899,HU YUANQI,胡圓棋
-#W23095,2025,P3,3D,3D,3D,,13,S9018664,LAM CHAK HANG,林澤衡
-#W23096,2025,P3,3D,3D,3D,,14,S9043316,LAM HOI LAM,林鎧琳
-#W23029,2025,P3,3D,3D,3D,,15,S8979105,LAU CHUN YIN,劉俊言
-#W23097,2025,P3,3D,3D,3D,,16,S9065352,LEE CHING HEI,李政熙
-#W23098,2025,P3,3D,3D,3D,,17,S9044940,LEUNG WAI HIN,梁偉軒
-#W23101,2025,P3,3D,3D,3D,,18,S9034252,LI KA LOK,李嘉樂
-#W23071,2025,P3,3D,3D,3D,,19,S8987728,MAN HEI YUI,文希睿
-#W23023,2025,P3,3D,3D,3D,,20,41903298,MARK HO LAM,麥可琳
+// CSV Data (Replaced with Full Student List)
+const RAW_CSV_DATA = `學生註冊編號,學年,級別,班別代碼,班號,學生編號,英文姓名,中文姓名
+W23083,2025,P3,3A,1,S9014979,CHAN SHEUNG KI,陳尚頎
+W23126,2025,P3,3A,2,S9198301,CHU HOI TUNG,朱凱彤
+W23084,2025,P3,3A,3,S9089944,CHUNG CHEUK LAM,鍾焯琳
+W23005,2025,P3,3A,4,S9024095,HAN JIAYING,韓佳穎
+W23024,2025,P3,3A,5,S9018699,HO CHEUK HIM,何卓謙
+W23007,2025,P3,3A,6,S9055810,KWOK SUM YU,郭芯妤
+W23010,2025,P3,3A,7,S9034260,LAM HEI MAN,林希蔓
+W23030,2025,P3,3A,8,S8979113,LAU PAK YIN,劉柏言
+W23011,2025,P3,3A,9,S9037464,LAU HIU YAU,劉曉悠
+W23013,2025,P3,3A,10,S9034503,LEE CHEUK NAM,李卓楠
+W23014,2025,P3,3A,11,S9030001,LEUNG TSZ CHING,梁梓晴
+W23012,2025,P3,3A,12,S9035119,LI KA LAM,李佳琳
+W23061,2025,P3,3A,13,S9150198,LUNG KA HAI,龍嘉熙
+W23063,2025,P3,3A,14,S8986527,MAN PAK HEI,文柏曦
+W23017,2025,P3,3A,15,S9034872,NG YUE FEI,吳雨霏
+W23145,2025,P3,3A,16,S9356349,POON HO HIN,潘浩軒
+W23046,2025,P3,3A,17,S8991444,SHAM CHEUK FUNG,岑卓峰
+W23018,2025,P3,3A,18,S9027981,TAI KA HEI,戴嘉希
+W23047,2025,P3,3A,19,S9047214,TAM KA YING,譚嘉瑩
+W23019,2025,P3,3A,20,S9014529,TO CHEUK WING,杜卓穎
+W23020,2025,P3,3A,21,S9034376,WONG TSZ YAU,王梓悠
+W23050,2025,P3,3A,22,S8977536,WONG CHUN HEI,黃俊熙
+W23149,2025,P3,3A,23,S9369068,WONG NGA LAM,黃雅琳
+W23021,2025,P3,3A,24,S9024044,YEUNG TSZ YUET,楊子悅
+W23022,2025,P3,3A,25,S9024036,ZHOU HAOYU,周浩宇
+W23086,2025,P3,3B,1,S9043324,CHAU YUK KIU,周鈺翹
+W23025,2025,P3,3B,2,S9042263,CHENG KA SHING,鄭嘉誠
+W23088,2025,P3,3B,3,S9050071,CHEUNG YIN TING,張賢廷
+W23004,2025,P3,3B,4,S9044959,FONG MAN HEI,方雯晞
+W23091,2025,P3,3B,5,S9034228,HO YU KI,何宇淇
+W23093,2025,P3,3B,6,S9065360,KO KWAN NGAI,高鈞毅
+W23008,2025,P3,3B,7,S9029968,KWOK TSZ YING,郭梓盈
+W23094,2025,P3,3B,8,S9061004,LAM YUET NAM,林悅楠
+W23032,2025,P3,3B,9,S9014499,LAU YAN TUNG,劉恩彤
+W23034,2025,P3,3B,10,S9011708,LEE CHUN YIN,李俊賢
+W23036,2025,P3,3B,11,S9024079,LEUNG CHUN SING,梁振聲
+W23038,2025,P3,3B,12,S9029933,LEUNG KA KI,梁嘉麒
+W23015,2025,P3,3B,13,S9044932,LEUNG WING CHIN,梁詠展
+W23041,2025,P3,3B,14,S8977528,LI SUM YAU,李芯悠
+W23099,2025,P3,3B,15,S9035089,LIU CHAK TO,廖澤滔
+W23062,2025,P3,3B,16,S9148452,LUI HOI YAU,雷凱悠
+W23102,2025,P3,3B,17,S9034295,MAN CHAK SING,文澤承
+W23016,2025,P3,3B,18,S9044398,NG KA YEE,吳嘉怡
+W23067,2025,P3,3B,19,S9044436,PANG CHIT LONG,彭哲朗
+W23103,2025,P3,3B,20,S9044355,SIU TSZ KI,蕭芷淇
+W23048,2025,P3,3B,21,S9011686,TSANG CHUN HEI,曾進希
+W23049,2025,P3,3B,22,S9042212,WAN PAK KIU,溫柏翹
+W23105,2025,P3,3B,23,S9042271,WONG HO TIN,黃浩天
+W23106,2025,P3,3B,24,S9037499,WONG YAN TING,黃欣婷
+W23107,2025,P3,3B,25,S9037480,XIE TSZ LAM,謝芷琳
+W23026,2025,P3,3C,1,S9018656,CHAN CHUN YIN,陳俊賢
+W23121,2025,P3,3C,2,S9205103,CHENG SUM YUET,鄭心悅
+W23028,2025,P3,3C,3,S9014561,CHIU CHUN KIT,趙俊傑
+W23090,2025,P3,3C,4,S9044991,FAN CHEUK KAN,范卓勤
+W23006,2025,P3,3C,5,S9044924,IP TIN LONG,葉天朗
+W23131,2025,P3,3C,6,S9221168,KEUNG YAN TUNG,姜欣彤
+W23132,2025,P3,3C,7,S9231457,KWOK KWAN LAM,郭君臨
+W23009,2025,P3,3C,8,S9029951,KWONG TSZ KIU,鄺芷蕎
+W23031,2025,P3,3C,9,S9014545,LAU TIN LONG,劉天朗
+W23033,2025,P3,3C,10,S9011708,LAW CHUN CHING,羅俊政
+W23035,2025,P3,3C,11,S9024087,LEE HOI CHING,李海晴
+W23037,2025,P3,3C,12,S9029941,LEE TSZ LAM,李芷琳
+W23039,2025,P3,3C,13,S9035097,LI CHEUK HEI,李卓熹
+W23040,2025,P3,3C,14,S8977501,LIU TSZ CHUNG,廖梓聰
+W23137,2025,P3,3C,15,S9255011,LUK CHI YEUNG,陸志揚
+W23043,2025,P3,3C,16,S8986519,MA SHU SUM,馬樹森
+W23044,2025,P3,3C,17,S8987760,MAK KA PO,麥嘉寶
+W23045,2025,P3,3C,18,S8987779,MIAO HO FUNG,繆浩峰
+W23138,2025,P3,3C,19,S9255021,MUI TSZ TO,梅子滔
+W23066,2025,P3,3C,20,S9037430,NGAN WING KEI,顏詠琪
+W23143,2025,P3,3C,21,S9318854,SIN CHEUK LAM,冼卓琳
+W23051,2025,P3,3C,22,S8979148,WONG HEI NAM,黃希楠
+W23052,2025,P3,3C,23,S8979130,WONG HIU YAN,黃曉欣
+W23108,2025,P3,3C,24,S9043286,YU CHUN HEI,余俊希
+W23109,2025,P3,3C,25,S9043294,ZHAO YAN LONG,趙言朗
+W23110,2025,P3,3D,1,S9042220,AU-YEUNG SUM YUET,歐陽心悅
+W23001,2025,P3,3D,2,S9018672,CHAN CHUN HO,陳俊豪
+W23002,2025,P3,3D,3,S9024052,CHAN CHUN HEI,陳俊熙
+W23085,2025,P3,3D,4,S9029984,CHAN HEI NGAI,陳希毅
+W23111,2025,P3,3D,5,S9037449,CHAN HEI WING,陳晞穎
+W23027,2025,P3,3D,6,S9014537,CHEN JIAYING,陳嘉盈
+W23122,2025,P3,3D,7,S9205111,CHENG TAI MING,鄭泰明
+W23124,2025,P3,3D,8,S9198328,CHEUNG KWAN TO,張鈞陶
+W23003,2025,P3,3D,9,S9014510,CHOW KA KEI,周嘉琪
+W23089,2025,P3,3D,10,S9043308,CHOW SZE CHAI,周斯齊
+W23127,2025,P3,3D,11,S9205146,CHU CHI HIN,朱智軒
+W23092,2025,P3,3D,12,S9034899,HU YUANQI,胡圓棋
+W23095,2025,P3,3D,13,S9018664,LAM CHAK HANG,林澤衡
+W23096,2025,P3,3D,14,S9043316,LAM HOI LAM,林鎧琳
+W23029,2025,P3,3D,15,S8979105,LAU CHUN YIN,劉俊言
+W23097,2025,P3,3D,16,S9065352,LEE CHING HEI,李政熙
+W23098,2025,P3,3D,17,S9044940,LEUNG WAI HIN,梁偉軒
+W23101,2025,P3,3D,18,S9034252,LI KA LOK,李嘉樂
+W23071,2025,P3,3D,19,S8987728,MAN HEI YUI,文希睿
+W23023,2025,P3,3D,20,41903298,MARK HO LAM,麥可琳
 `;
 
 const App = () => {
@@ -445,18 +422,36 @@ const App = () => {
   const [netPwd, setNetPwd] = useState('');
   const [selectedShop, setSelectedShop] = useState(null); 
 
-  // Data Parsing
+  // Data Parsing (Updated for Number. Name)
   const allStudents = useMemo(() => {
     const lines = RAW_CSV_DATA.trim().split('\n').slice(1);
     return lines.map(line => {
       const p = line.split(',');
-      return { class: p[3], name_zh: p[10], name_en: p[9], id: `${p[3]}_${p[10]}` };
+      const cls = p[3];
+      const num = parseInt(p[4]); // Extract class number
+      const name_zh = p[7];
+      const name_en = p[6];
+      // ID unique key
+      return { 
+        class: cls, 
+        number: num, 
+        name_zh: name_zh, 
+        name_en: name_en, 
+        id: `${cls}_${num}` 
+      };
     });
   }, []);
 
   const studentsByClass = useMemo(() => {
     const map = { '3A': [], '3B': [], '3C': [], '3D': [] };
-    allStudents.forEach(s => { if(map[s.class]) map[s.class].push(s); });
+    // Sort by class number numerically
+    allStudents.forEach(s => { 
+      if(map[s.class]) map[s.class].push(s); 
+    });
+    // Sort each class array
+    Object.keys(map).forEach(k => {
+      map[k].sort((a, b) => a.number - b.number);
+    });
     return map;
   }, [allStudents]);
 
@@ -603,6 +598,7 @@ const App = () => {
           name: currentStudent.name_zh,
           name_en: currentStudent.name_en,
           class: currentStudent.class,
+          number: currentStudent.number, // Save class number
           status: 'playing',
           score: prevScore,
           correctCount: prevCorrect,
@@ -808,7 +804,7 @@ const App = () => {
   };
 
   const downloadCSV = () => {
-    const headers = ["Class", "Name", "Score", "Correct", "Wrong", "Accuracy (%)", "Analysis"];
+    const headers = ["Class", "Number", "Name", "Score", "Correct", "Wrong", "Accuracy (%)", "Analysis"];
     const csvRows = [headers.join(",")];
 
     liveData.forEach(s => {
@@ -831,6 +827,7 @@ const App = () => {
 
       const row = [
         s.class,
+        s.number,
         s.name,
         s.score,
         correct,
@@ -868,7 +865,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.2</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.3</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
@@ -911,7 +908,7 @@ const App = () => {
                 <div className="w-16"></div>
               </div>
               <div className="grid grid-cols-4 lg:grid-cols-5 gap-3 overflow-y-auto p-2">
-                {studentsByClass[selectedClass]?.map(s => <button key={s.id} onClick={() => {setCurrentStudent(s); setStudentView('difficulty');}} className="p-4 bg-slate-50 hover:bg-orange-100 rounded-xl text-left border font-bold text-lg">{s.name_zh}</button>)}
+                {studentsByClass[selectedClass]?.map(s => <button key={s.id} onClick={() => {setCurrentStudent(s); setStudentView('difficulty');}} className="p-4 bg-slate-50 hover:bg-orange-100 rounded-xl text-left border font-bold text-lg">{s.number}. {s.name_zh}</button>)}
               </div>
             </div>
           )}
@@ -920,7 +917,7 @@ const App = () => {
             <div className="flex-grow flex flex-col justify-center items-center space-y-6">
               <h3 className="text-3xl font-black">選擇挑戰難度</h3>
               {/* Added Student Info */}
-              {currentStudent && <p className="text-xl text-slate-500 font-bold">Student: {currentStudent.class} {currentStudent.name_zh}</p>}
+              {currentStudent && <p className="text-xl text-slate-500 font-bold">Student: {currentStudent.class} ({currentStudent.number}) {currentStudent.name_zh}</p>}
               
               <div className="grid grid-cols-3 gap-8 w-full max-w-6xl">
                 <button onClick={() => {setDifficulty('low'); setStudentView('intro');}} className="p-12 bg-green-100 border-4 border-green-300 rounded-3xl text-3xl font-black text-green-800 hover:scale-105 transition-transform shadow-lg">
@@ -961,7 +958,7 @@ const App = () => {
                 <div className="w-2/3 bg-slate-50 rounded-3xl border-4 border-slate-100 flex flex-col items-center justify-center relative p-8 shadow-inner">
                   {/* Name Display */}
                   <div className="absolute top-4 left-6 text-slate-400 font-bold text-xl">
-                    {currentStudent.class} {currentStudent.name_zh}
+                    {currentStudent.class} ({currentStudent.number}) {currentStudent.name_zh}
                   </div>
                   {strikes > 0 && <span className="absolute top-4 right-4 text-red-500 font-bold bg-red-100 px-4 py-2 rounded-xl text-lg">錯誤: {strikes}/3</span>}
                   
@@ -1098,7 +1095,7 @@ const App = () => {
                     <div key={s.id} className={`p-3 rounded-xl border-2 flex flex-col gap-2 ${s.redeemed ? 'bg-green-50 border-green-200 opacity-60' : 'bg-white border-slate-100'}`}>
                       <div className="flex justify-between items-center">
                         <div>
-                          <span className="font-bold text-md block text-slate-800">{s.name}</span>
+                          <span className="font-bold text-md block text-slate-800">{s.number}. {s.name}</span>
                           <div className="flex gap-3 text-xs mt-1">
                             <span className="font-bold text-orange-500"><Coins size={10} className="inline mr-1"/>{s.score}</span>
                             <span className={`font-black ${selectedShop.textColor}`}>${hkd}</span>
@@ -1170,7 +1167,7 @@ const App = () => {
                 {liveData.filter(d => d.class === cls).map(s => (
                   <div key={s.id} className={`p-3 rounded-xl border-2 flex justify-between items-center ${s.redeemed ? 'bg-green-50 border-green-200' : 'bg-white border-slate-100'}`}>
                     <div>
-                      <span className="font-bold text-md block">{s.name}</span>
+                      <span className="font-bold text-md block">{s.number}. {s.name}</span>
                       <span className="text-xs text-slate-400 font-bold">{s.status === 'playing' ? '🔥 Playing' : (s.redeemed ? '✅ Done' : '⭕ Waiting')}</span>
                     </div>
                     <div className="flex items-center gap-2">
