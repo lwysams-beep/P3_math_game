@@ -1,11 +1,11 @@
 // @ts-nocheck
-// P.3 理財數學王 v6.8 (Student List with Numbers)
-// Date: 2026-01-14
+// P.3 理財數學王 v6.9 (Curriculum Update: 4-Digit & Specific Division)
+// Date: 2026-01-15
 // Fixes: 
-// 1. Updated RAW_CSV_DATA with full class list from "StuInfo_All(3A,3B,3C,3D).csv".
-// 2. Updated CSV parsing logic to extract Class Number (Col E/Index 4).
-// 3. Student selection list now sorted by Class Number.
-// 4. Display format changed to: "1. 陳大文" (Number. Name).
+// 1. REMOVED: Mixed Multiplication/Addition questions.
+// 2. ADDED (All Levels): 4-Digit Addition & Subtraction (Calculation & Word Problems).
+// 3. ADDED (Mid Level): Specific Word Problems for "3-digit / 1-digit = 2-digit".
+// 4. Data: Uses full student list from CSV.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
@@ -48,7 +48,8 @@ const SHOPS = [
   { id: 'C', name_zh: 'C店 (VIP找換)',   name_en: 'Shop C (VIP Exchange)',   rate: 5, color: 'bg-purple-600', lightColor: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-700' }
 ];
 
-// --- 3. Smart Question Generator (v6.2 Logic) ---
+// --- 3. Smart Question Generator (v6.9 Logic) ---
+
 const ITEMS_DB = [
   { name: '蘋果', unit: '個' }, { name: '橙', unit: '個' }, { name: '西瓜', unit: '個' },
   { name: '擦膠', unit: '塊' }, { name: '鉛筆', unit: '枝' }, { name: '原子筆', unit: '枝' },
@@ -64,141 +65,275 @@ const ITEMS_DB = [
 const getRandomItem = () => ITEMS_DB[Math.floor(Math.random() * ITEMS_DB.length)];
 const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
+// --- GENERATOR FUNCTION ---
 const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) => {
   let q = "", a = 0, score = 0, penalty = 0, hint = "", category = "";
   let signature = "";
-  let subType = "";
+  let subType = ""; 
   let attempts = 0;
 
+  // Pattern: 2 Calc, 1 App
   const isAppTurn = (questionIndex % 3 === 0); 
   
   do {
     attempts++;
     const rand = Math.random();
 
+    // ==========================================
+    // LOW DIFFICULTY
+    // Focus: 2-digit Mul/Div, and 4-digit Add/Sub (Standard)
+    // ==========================================
     if (difficulty === 'low') {
       score = 5; penalty = 2;
       
-      if (!isAppTurn) { 
-        if (rand < 0.5) {
+      if (!isAppTurn) { // Calculation
+        if (rand < 0.25) {
+          // 4-Digit Addition (New)
+          const n1 = randomInt(1000, 5000);
+          const n2 = randomInt(1000, 4000);
+          q = `${n1} + ${n2} = ?`;
+          a = n1 + n2;
+          hint = `試用直式加法：由個位加起，滿十進一。`;
+          category = 'add';
+          subType = 'calc_add_4d';
+          signature = `add-${n1}-${n2}`;
+        } else if (rand < 0.5) {
+          // 4-Digit Subtraction (New)
+          const n1 = randomInt(2000, 9999);
+          const n2 = randomInt(1000, n1 - 100);
+          q = `${n1} - ${n2} = ?`;
+          a = n1 - n2;
+          hint = `試用直式減法：由個位減起，不夠減向十位借位。`;
+          category = 'sub';
+          subType = 'calc_sub_4d';
+          signature = `sub-${n1}-${n2}`;
+        } else if (rand < 0.75) {
+          // 2-digit Mul (Existing)
           const n1 = randomInt(12, 49); 
           const n2 = randomInt(2, 6);   
           q = `${n1} × ${n2} = ?`;
           a = n1 * n2;
-          hint = `數學老師提示：\n試用直式計算。先算個位 ${n1%10} × ${n2}，再算十位。`;
+          hint = `試用直式計算。先算個位，再算十位。`;
           category = 'mul';
           subType = 'calc_mul';
           signature = `mul-${n1}-${n2}`;
         } else {
+          // Division (Existing)
           const ans = randomInt(12, 19); 
           const n2 = randomInt(2, 5);    
           const total = ans * n2;
           q = `${total} ÷ ${n2} = ?`;
           a = ans;
-          hint = `數學老師提示：\n${n2} 乘 10 是 ${n2*10}，答案比 10 大一點。`;
+          hint = `背誦乘法表：${n2} 乘什麼數會等於 ${total}？`;
           category = 'div';
           subType = 'calc_div';
           signature = `div-${total}-${n2}`;
         }
-      } else { 
-        const item = getRandomItem();
-        const count = randomInt(2, 5); 
-        const price = randomInt(12, 25); 
+      } else { // Word Problem
+        const typeRand = Math.random();
         
-        if (randomInt(1, 2) === 1) {
-             q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
+        if (typeRand < 0.4) {
+          // 4-Digit Add/Sub Application (New)
+          const isAdd = Math.random() > 0.5;
+          const n1 = randomInt(1200, 4500);
+          const n2 = randomInt(1000, 3000);
+          if (isAdd) {
+            q = `圖書館有中文書 ${n1} 本，英文書 ${n2} 本，共有書多少本？`;
+            a = n1 + n2;
+            hint = `求總數，用加法：${n1} + ${n2}`;
+            category = 'add';
+          } else {
+            const total = n1 + n2; // Ensure n1 is bigger contextually
+            q = `超級市場原本有 ${total} 包米，賣出了 ${n2} 包，還剩下多少包？`;
+            a = total - n2;
+            hint = `求剩下，用減法：${total} - ${n2}`;
+            category = 'sub';
+          }
+          subType = 'app_4d_addsub';
+          signature = `app-4d-${category}-${n1}-${n2}`;
+
         } else {
-             q = `小明想買 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共要付多少錢？`;
+          // Existing Shopping App
+          const item = getRandomItem();
+          const count = randomInt(2, 5); 
+          const price = randomInt(12, 25); 
+          q = `${item.unit}${item.name}售 $${price}，買 ${count} ${item.unit}需付多少元？`;
+          a = price * count;
+          hint = `單價($${price}) 乘以 數量(${count})。`;
+          category = 'app';
+          subType = 'app_shopping';
+          signature = `app-shop-${price}-${count}`;
         }
-        
-        a = price * count;
-        hint = `這是乘法應用題。單價($${price}) 乘以 數量(${count})。`;
-        category = 'app';
-        subType = 'app_shopping';
-        signature = `app-${price}-${count}`;
       }
     } 
+    
+    // ==========================================
+    // MID DIFFICULTY
+    // Focus: Harder 4-digit Add/Sub, Specific Div (3d/1d=2d)
+    // ==========================================
     else if (difficulty === 'mid') {
       score = 10; penalty = 5;
       
       if (!isAppTurn) { 
-        if (rand < 0.5) {
+        if (rand < 0.3) {
+           // 4-Digit Add (Harder)
+           const n1 = randomInt(2500, 6500);
+           const n2 = randomInt(2500, 3400); // Likely to carry
+           q = `${n1} + ${n2} = ?`;
+           a = n1 + n2;
+           hint = `四位數加法：留意進位。`;
+           category = 'add';
+           subType = 'calc_add_4d';
+           signature = `add-${n1}-${n2}`;
+        } else if (rand < 0.6) {
+           // 4-Digit Sub (Harder)
+           const n1 = randomInt(5000, 9500);
+           const n2 = randomInt(2500, 4900); // Likely to borrow
+           q = `${n1} - ${n2} = ?`;
+           a = n1 - n2;
+           hint = `四位數減法：留意退位。`;
+           category = 'sub';
+           subType = 'calc_sub_4d';
+           signature = `sub-${n1}-${n2}`;
+        } else if (rand < 0.8) {
+          // Harder 2-digit Mul
           const n1 = randomInt(35, 95); 
           const n2 = randomInt(3, 8);   
           q = `${n1} × ${n2} = ?`;
           a = n1 * n2;
-          hint = "直式計算：注意進位！先算個位，積滿十要進到十位。";
+          hint = "直式計算：注意進位！";
           category = 'mul';
           subType = 'calc_mul';
           signature = `mul-${n1}-${n2}`;
         } else {
+          // Harder Division
           let ans;
-          do { ans = randomInt(13, 35); } while (ans % 10 === 0 || ans % 11 === 0);
+          do { ans = randomInt(13, 35); } while (ans % 10 === 0);
           const n2 = randomInt(3, 7);    
           const total = ans * n2;
           q = `${total} ÷ ${n2} = ?`;
           a = ans;
-          hint = `試用直式除法：先看十位夠不夠除。`;
+          hint = `試用直式除法。`;
           category = 'div';
           subType = 'calc_div';
           signature = `div-${total}-${n2}`;
         }
       } else { 
-        const item = getRandomItem();
+        // --- MID APPLICATIONS ---
         const tpl = randomInt(1, 3);
         
         if (tpl === 1) { 
-            const count = randomInt(4, 9);
-            const price = randomInt(15, 45);
-            q = `老師買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
-            a = price * count;
-            hint = `總金額 = 單價 × 數量。`;
-            subType = 'app_shopping';
-            signature = `app-${price}-${count}`;
+            // NEW: Specific Division (3-digit / 1-digit = 2-digit answer)
+            // Dividend must be >= 100. Quotient must be < 100.
+            const divisor = randomInt(3, 8);
+            const quotient = randomInt(12, 99); // 2-digit
+            const dividend = divisor * quotient;
+            
+            // Ensure dividend is 3-digit
+            if (dividend >= 100) {
+               const item = getRandomItem();
+               q = `工廠生產了 ${dividend} ${item.unit}${item.name}，平均裝入 ${divisor} 個箱子，每箱有多少${item.unit}？`;
+               a = quotient;
+               hint = `這是除法應用題：${dividend} (三位數) ÷ ${divisor} (一位數)。`;
+               subType = 'app_div_3d1d';
+               signature = `app-div-${dividend}-${divisor}`;
+               category = 'div';
+            } else {
+               // Fallback to shopping if numbers don't match criteria
+               const count = randomInt(5, 9);
+               const price = randomInt(15, 35);
+               const item = getRandomItem();
+               q = `買 ${count} ${item.unit}${item.name}，每${item.unit} $${price}，共需付多少元？`;
+               a = price * count;
+               hint = `總金額 = 單價 × 數量。`;
+               subType = 'app_shopping';
+               signature = `app-${price}-${count}`;
+               category = 'app';
+            }
+
         } else if (tpl === 2) { 
-            const total = randomInt(40, 90);
-            const perPerson = randomInt(3, 8);
-            const grandTotal = total - (total % perPerson); 
-            q = `有 ${grandTotal} ${item.unit}${item.name}，平均分給 ${perPerson} 位同學，每人可得多少${item.unit}？`;
-            a = grandTotal / perPerson;
-            hint = `關鍵字是「平均分」，這代表要用除法。`;
-            subType = 'app_sharing';
-            signature = `app-${grandTotal}-${perPerson}`;
+            // 4-Digit Add/Sub App
+            const isAdd = Math.random() > 0.5;
+            if (isAdd) {
+               const n1 = randomInt(1500, 3500);
+               const n2 = randomInt(1200, 2800);
+               q = `遊樂場上午有 ${n1} 人入場，下午有 ${n2} 人，全日共有多少人入場？`;
+               a = n1 + n2;
+               hint = "將上午和下午的人數相加。";
+               category = 'add';
+            } else {
+               const n1 = randomInt(5000, 9000);
+               const n2 = randomInt(1000, 3500);
+               q = `爸爸原本有 $${n1}，買了一部電腦用了 $${n2}，他還剩下多少元？`;
+               a = n1 - n2;
+               hint = "用原本的錢減去用去的錢。";
+               category = 'sub';
+            }
+            subType = 'app_4d_mid';
+            signature = `app-4d-${category}-${a}`;
+
         } else { 
-            const days = randomInt(5, 9);
-            const saving = randomInt(12, 25);
+            // Savings (Mul)
+            const days = randomInt(6, 12);
+            const saving = randomInt(15, 45);
             q = `小美每天儲蓄 $${saving}，${days} 天後她共儲蓄了多少元？`;
             a = saving * days;
-            hint = `每天存一樣的錢，存了多天，用乘法計算總額。`;
+            hint = `每天存一樣的錢，用乘法計算總額。`;
             subType = 'app_savings';
             signature = `app-${saving}-${days}`;
+            category = 'app';
         }
-        category = 'app';
       }
     } 
+    
+    // ==========================================
+    // HIGH DIFFICULTY (ALL WORD PROBLEMS, NO REPEAT TYPE)
+    // Removed Mixed Calc. Added 4-Digit.
+    // ==========================================
     else { 
       score = 20; penalty = 10;
       category = 'app'; 
 
       const HIGH_TYPES = [
-          'shopping', 'change', 'mixed_money', 'savings', 
-          'length', 'weight', 'general_mul', 'general_div', 'leftover' 
+          'shopping', 'change', 'savings', // Money Mul/Sub
+          'length', 'weight', 'general_mul', 'general_div', 'leftover', // Measures & Logic
+          'add_4d', 'sub_4d' // New 4-digit Types
       ];
       
       const availableTypes = HIGH_TYPES.filter(t => t !== lastType);
       const chosenType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
       
       subType = chosenType; 
-
       const item = getRandomItem();
 
-      if (chosenType === 'shopping') {
-          const count = randomInt(6, 15);
-          const price = randomInt(45, 120);
+      // -- 4-Digit Addition/Subtraction Apps --
+      if (chosenType === 'add_4d') {
+          const n1 = randomInt(2500, 4500);
+          const n2 = randomInt(1800, 4200);
+          q = `A 倉庫存有 ${n1} 公斤白米，B 倉庫存有 ${n2} 公斤。兩個倉庫共有白米多少公斤？`;
+          a = n1 + n2;
+          hint = `四位數加法：${n1} + ${n2}`;
+          signature = `high-add-${n1}-${n2}`;
+          category = 'add';
+      } else if (chosenType === 'sub_4d') {
+          const total = randomInt(5000, 9800);
+          const used = randomInt(2000, 4500);
+          q = `馬拉松比賽共有 ${total} 人報名，其中 ${used} 人完成了比賽。有多少人未完成？`;
+          a = total - used;
+          hint = `四位數減法：${total} - ${used}`;
+          signature = `high-sub-${total}-${used}`;
+          category = 'sub';
+      }
+
+      // -- Existing Types (Removed Mixed) --
+      else if (chosenType === 'shopping') {
+          const count = randomInt(8, 18);
+          const price = randomInt(50, 150);
           q = `學校訂購了 ${count} ${item.unit}${item.name}，每${item.unit}價值 $${price}。學校共需支付多少元？`;
           a = price * count;
           hint = `數字較大，請小心用直式乘法：$${price} × ${count}`;
           signature = `high-shop-${price}-${count}`;
+          category = 'mul';
 
       } else if (chosenType === 'change') {
           const wallet = randomInt(5, 10) * 100;
@@ -212,70 +347,66 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
           } else {
              q = `爸爸有 $${wallet}，買了 ${count} ${item.unit}${item.name}，每${item.unit} $${price}。應找回多少元？`;
              a = wallet - cost;
-             hint = `這題有兩步：1. 先算總花費 2. 再用 $${wallet} 減去花費。`;
+             hint = `找贖：$${wallet} - ($${price} × ${count})`;
           }
           signature = `high-change-${wallet}-${price}-${count}`;
-
-      } else if (chosenType === 'mixed_money') {
-          const item2 = ITEMS_DB[(ITEMS_DB.indexOf(item) + 3) % ITEMS_DB.length];
-          const p1 = randomInt(25, 60);
-          const p2 = randomInt(15, 40);
-          const qty1 = randomInt(2, 5);
-          const qty2 = randomInt(2, 4);
-          q = `買 ${qty1} ${item.unit}${item.name} (每${item.unit}$${p1}) 和 ${qty2} ${item2.unit}${item2.name} (每${item2.unit}$${p2})，共需付多少元？`;
-          a = (p1 * qty1) + (p2 * qty2);
-          hint = `混合題：先分開算兩種物品的總價，再相加。`;
-          signature = `high-mix-${p1}-${qty1}-${p2}-${qty2}`;
+          category = 'logic';
 
       } else if (chosenType === 'savings') {
-          const weeks = randomInt(4, 12);
-          const weeklySaving = randomInt(50, 150);
+          const weeks = randomInt(6, 15);
+          const weeklySaving = randomInt(80, 250);
           q = `小明每星期儲蓄 $${weeklySaving}，${weeks} 星期後他共儲蓄了多少元？`;
           a = weeklySaving * weeks;
-          hint = `每星期存 $${weeklySaving}，存了 ${weeks} 次，用乘法。`;
+          hint = `乘法應用題：$${weeklySaving} × ${weeks}`;
           signature = `high-save-${weeklySaving}-${weeks}`;
+          category = 'mul';
       }
 
       else if (chosenType === 'length') {
-          const len = randomInt(15, 45); 
-          const count = randomInt(4, 9);
+          const len = randomInt(25, 85); 
+          const count = randomInt(5, 12);
           q = `一條絲帶長 ${len} 厘米，老師買了 ${count} 條，共有多少厘米？`;
           a = len * count;
-          hint = `每條長 ${len} cm，有 ${count} 條，用乘法求總長度。`;
+          hint = `總長度 = 每條長度 × 數量。`;
           signature = `high-len-${len}-${count}`;
+          category = 'app';
 
       } else if (chosenType === 'weight') {
-          const weight = randomInt(120, 250); 
-          const count = randomInt(3, 6);
+          const weight = randomInt(150, 450); 
+          const count = randomInt(4, 8);
           q = `一個蘋果重 ${weight} 克，${count} 個蘋果共重多少克？`;
           a = weight * count;
-          hint = `單個重量 × 數量 = 總重量。`;
+          hint = `總重量 = 單個重量 × 數量。`;
           signature = `high-wgt-${weight}-${count}`;
+          category = 'app';
 
       } else if (chosenType === 'general_mul') {
-          const shelves = randomInt(4, 9);
-          const booksPerShelf = randomInt(25, 65);
+          const shelves = randomInt(5, 12);
+          const booksPerShelf = randomInt(40, 95);
           q = `圖書館有 ${shelves} 個書架，每個書架放了 ${booksPerShelf} 本書，共有書多少本？`;
           a = booksPerShelf * shelves;
-          hint = `每架有 ${booksPerShelf} 本，有 ${shelves} 架，用乘法。`;
+          hint = `乘法：${booksPerShelf} × ${shelves}`;
           signature = `high-gen-mul-${booksPerShelf}-${shelves}`;
+          category = 'mul';
 
       } else if (chosenType === 'general_div') {
-          const totalItems = randomInt(15, 60) * 5; 
+          const totalItems = randomInt(20, 80) * 5; 
           const boxes = 5;
           q = `工廠生產了 ${totalItems} 塊餅乾，平均裝入 ${boxes} 個罐子，每罐有多少塊？`;
           a = totalItems / boxes;
           hint = `「平均裝入」是除法題目。`;
           signature = `high-gen-div-${totalItems}-${boxes}`;
+          category = 'div';
 
       } else if (chosenType === 'leftover') {
-          const start = randomInt(100, 300);
-          const deduct = randomInt(10, 30);
-          const count = randomInt(3, 6);
+          const start = randomInt(200, 500);
+          const deduct = randomInt(15, 45);
+          const count = randomInt(4, 8);
           q = `水桶裡有 ${start} 毫升水，倒出了 ${count} 杯，每杯 ${deduct} 毫升。水桶裡還剩下多少毫升水？`;
           a = start - (deduct * count);
-          hint = `1. 先算倒出了多少水 (${deduct} × ${count})\n2. 再用原本的水量減去倒出的量。`;
+          hint = `先算倒出了多少 (${deduct} × ${count})，再用 ${start} 減去它。`;
           signature = `high-leftover-${start}-${deduct}-${count}`;
+          category = 'logic';
       }
     }
 
@@ -284,107 +415,103 @@ const generateQuestion = (difficulty, questionIndex, lastQSignature, lastType) =
   return { q, a, score, penalty, difficulty, hint, category, signature, subType };
 };
 
-// CSV Data (Replaced with Full Student List)
+// CSV Data 
 const RAW_CSV_DATA = `學生註冊編號,學年,級別,班別代碼,班號,學生編號,英文姓名,中文姓名
 W23083,2025,P3,3A,1,S9014979,CHAN SHEUNG KI,陳尚頎
-W24117,2025,P3,3A,2,S9025822,CHAN TING YAN,陳廷欣
-W23082,2025,P3,3A,3,S8840050,CHAN TSZ TUNG,陳芷潼
-W23038,2025,P3,3A,4,41903790,CHAN UE CHI,陳妤芝
-W23085,2025,P3,3A,5,M9132207,CHAU KWAN YIU,周均垚
-W23089,2025,P3,3A,6,S9036638,CHIU YU HIN,趙宇軒
-W23090,2025,P3,3A,7,S8775291,CHOI TSZ CHING,蔡芷晴
-W23092,2025,P3,3A,8,S8957705,FUNG HO YING HAILIE,馮可盈
-W23041,2025,P3,3A,9,S8983447,FUNG HOI KAN,馮凱勤
-W23012,2025,P3,3A,10,S8812014,KWONG HAYDEN,鄺廷羲
-W25110,2025,P3,3A,11,74323819,LAN BINJIA,藍彬嘉
-W23016,2025,P3,3A,12,S9024184,LAW PUI YI,羅貝兒
-W23097,2025,P3,3A,13,S8890481,LEE CHAU YI,李秋兒
-W23048,2025,P3,3A,14,S9001338,LIN HEI LAM,連希霖
-W23049,2025,P3,3A,15,S8758567,LIU SUM YIU,廖心媱
-W25111,2025,P3,3A,16,S8788024,LIU TSZ KI,劉芷琪
-W23073,2025,P3,3A,17,S8988252,PANG YU HANG,彭宇恒
-W23024,2025,P3,3A,18,S898947A,SAMPEDRO HERNANDEZ MIA,黎美雅
-W23026,2025,P3,3A,19,S8978257,TANG HOU LEON,鄧灝麟
-W23028,2025,P3,3A,20,S8785165,TSANG PO SZE,曾寶詩
-W23100,2025,P3,3A,21,S8597717,TSUI TSZ WUN,徐梓媛
-W23074,2025,P3,3A,22,S9037294,WANG YIK WUN,王亦桓
-W23031,2025,P3,3A,23,S9021746,WONG WAI FUNG,黃偉灃
-W23035,2025,P3,3A,24,S9293770,YEUNG PUI HEI,楊培熙
-W23077,2025,P3,3A,25,S8940802,YIP HOI KI,葉海棋
-W23078,2025,P3,3A,26,S8591441,YIP TSZ HIN,葉梓軒
-W23059,2025,P3,3B,1,S902463A,CHAN HOK YI ZISHAN,陳學而
-W25109,2025,P3,3B,2,S8492001,CHAN KIN TING,陳建廷
-W23004,2025,P3,3B,3,S8896129,CHAN ON YIN,陳安妍
-W23037,2025,P3,3B,4,S8602672,CHAN TAK LAM,陳德林
-W23081,2025,P3,3B,5,S8840042,CHAN TSZ KIN,陳梓健
-W23005,2025,P3,3B,6,S8837130,CHENG YIP CHUEN,鄭業泉
-W23087,2025,P3,3B,7,S8394441,CHEUNG HOI TING,張凱婷
-W23007,2025,P3,3B,8,S9031601,CHEUNG PAK KIU,張珀僑
-W23043,2025,P3,3B,9,S9034864,HUANG HOI CHUN,黃凱駿
-W23064,2025,P3,3B,10,S8803031,HUNG WING SUM,孔詠芯
-W23010,2025,P3,3B,11,S8764206,KAN MAN KI,簡汶琪
-W23044,2025,P3,3B,12,S9050568,KWOK ANGIE CHIN YIU,郭芊瑤
-W23045,2025,P3,3B,13,S9016106,LAI HAU SHING,賴孝晟
-W23046,2025,P3,3B,14,S9050924,LEUNG WING TUNG,梁詠瞳
-W23098,2025,P3,3B,15,S8726843,LI HANG KEI,李幸錡
-W23019,2025,P3,3B,16,41904215,LIN SZE MAU,林思漫
-W23022,2025,P3,3B,17,S9023641,LO KI KI,盧琦淇
-W23069,2025,P3,3B,18,S887169A,LUI KAI YING,呂佳瑩
-W23099,2025,P3,3B,19,S8657574,NG KAI YUI,吳楷睿
-W23072,2025,P3,3B,20,S8817431,NG YAN YU,吳忻妤
-W23029,2025,P3,3B,21,S8961745,TSANG SHING HEI,曾承希
-W23054,2025,P3,3B,22,S903970A,WEN SIN YU,?善喻
-W23033,2025,P3,3B,23,S9023579,YANG TING HEI,楊廷熙
-W23104,2025,P3,3B,24,S902074A,YUEN CHUN TANG,袁振騰
-W23079,2025,P3,3B,25,S9029712,ZHU PAK LAM,朱柏霖
-W23003,2025,P3,3C,1,S9016351,CHAN HEI TING,陳希婷
-W23084,2025,P3,3C,2,S9032969,CHAN YUE ALSTON,陳譽
-W23086,2025,P3,3C,3,S902169A,CHENG SUM YAU BIANCA,鄭心悠
-W22033,2025,P3,3C,4,S8077942,CHEUNG YING JIE,張應杰
-W22005,2025,P3,3C,5,S8157334,CHEUNG YU SHING,張語城
-W23063,2025,P3,3C,6,S9039947,CHOI YUEN TUNG,蔡宛彤
-W23011,2025,P3,3C,7,41898538,KOO HO YU,古皓宇
-W23094,2025,P3,3C,8,S8727874,LAM SUM CHING,林芯晴
-W23017,2025,P3,3C,9,S9016823,LAW SUM WING,羅心穎
-W23068,2025,P3,3C,10,S919456A,LAW YIU SING,羅耀升
-W23020,2025,P3,3C,11,41903818,LIU KEXIN,劉可欣
-W23021,2025,P3,3C,12,S8891070,LIU POK HON,劉博瀚
-W23070,2025,P3,3C,13,S8987736,MAN HEI WAI,文希維
-W23050,2025,P3,3C,14,S8794806,SHU CHUNG KWOK,束鍾國
-W23025,2025,P3,3C,15,S9019326,SZE YUET LAM FEDORA,施玥琳
-W23052,2025,P3,3C,16,S8973093,TONG TSZ YUI,湯子睿
-W23053,2025,P3,3C,17,S9035240,TSANG HO FUNG,曾浩楓
-W24126,2025,P3,3C,18,74186620,TSUI PUI KI,徐佩琪
-W23075,2025,P3,3C,19,M8020138,WONG TSZ TUNG,黃芷桐
-W23032,2025,P3,3C,20,S9242149,WOO MAN LIN,胡曼琳
-W23055,2025,P3,3C,21,S9000129,WU HAOEN,吳浩恩
-W23101,2025,P3,3C,22,M9818494,WU JIALIN,吳嘉淋
-W23102,2025,P3,3C,23,S8465284,YAN YUK HO,顏鈺壕
-W23076,2025,P3,3C,24,S9019784,YEUNG MING HEI,楊明熙
-W23001,2025,P3,3D,1,S8842177,AU HOI YEE,歐鎧沂
-W22060,2025,P3,3D,2,S8082865,AU SZE YU,區思宇
-W23002,2025,P3,3D,3,S8978583,CHAN CHIT LONG JAYVIS,陳哲朗
-W23036,2025,P3,3D,4,S9021967,CHAN MEI CHI MAY,陳美芝
-W23039,2025,P3,3D,5,S8985342,CHAN WING YI,陳泳沂
-W23040,2025,P3,3D,6,S8395022,CHENG TSZ YING,鄭梓瀅
-W23091,2025,P3,3D,7,S8915603,CHU CHUN KIT,朱俊傑
-W23009,2025,P3,3D,8,S8909840,DENG TSZ YAN,鄧梓欣
-W23042,2025,P3,3D,9,S8382206,HONG WAI HEI,洪維禧
-W23093,2025,P3,3D,10,M9414679,HUNG YIK MAN,洪翊文
-W23080,2025,P3,3D,11,S8385523,LAI YU HO,黎宇皓
-W23066,2025,P3,3D,12,41903914,LAM SZE HAM,林詩涵
-W23013,2025,P3,3D,13,S8385167,LAM TSZ WAI VIANNE,林子蕙
-W23096,2025,P3,3D,14,S8915085,LAU CHEUK WING,劉綽穎
-W23015,2025,P3,3D,15,41898495,LAW PO YU,羅寶瑜
-W23130,2025,P3,3D,16,74163097,LEUNG YUK NING,梁育寧
-W23047,2025,P3,3D,17,S8331245,LI KA LOK,李嘉樂
-W23071,2025,P3,3D,18,S8987728,MAN HEI YUI,文希睿
-W23023,2025,P3,3D,19,41903298,MARK HO LAM,麥可琳
-W23051,2025,P3,3D,20,S8964280,SUEN YAT CHI,孫逸智
-W23027,2025,P3,3D,21,S9012003,TONG TSZ TO,唐梓滔
-W23056,2025,P3,3D,22,S8977021,YIM MAN SIU,嚴文少
-W23057,2025,P3,3D,23,S8981118,YIP CHEUK LAM,葉卓霖
-W23103,2025,P3,3D,24,S8679519,YUE HO TAK,余浩德
+W23126,2025,P3,3A,2,S9198301,CHU HOI TUNG,朱凱彤
+W23084,2025,P3,3A,3,S9089944,CHUNG CHEUK LAM,鍾焯琳
+W23005,2025,P3,3A,4,S9024095,HAN JIAYING,韓佳穎
+W23024,2025,P3,3A,5,S9018699,HO CHEUK HIM,何卓謙
+W23007,2025,P3,3A,6,S9055810,KWOK SUM YU,郭芯妤
+W23010,2025,P3,3A,7,S9034260,LAM HEI MAN,林希蔓
+W23030,2025,P3,3A,8,S8979113,LAU PAK YIN,劉柏言
+W23011,2025,P3,3A,9,S9037464,LAU HIU YAU,劉曉悠
+W23013,2025,P3,3A,10,S9034503,LEE CHEUK NAM,李卓楠
+W23014,2025,P3,3A,11,S9030001,LEUNG TSZ CHING,梁梓晴
+W23012,2025,P3,3A,12,S9035119,LI KA LAM,李佳琳
+W23061,2025,P3,3A,13,S9150198,LUNG KA HAI,龍嘉熙
+W23063,2025,P3,3A,14,S8986527,MAN PAK HEI,文柏曦
+W23017,2025,P3,3A,15,S9034872,NG YUE FEI,吳雨霏
+W23145,2025,P3,3A,16,S9356349,POON HO HIN,潘浩軒
+W23046,2025,P3,3A,17,S8991444,SHAM CHEUK FUNG,岑卓峰
+W23018,2025,P3,3A,18,S9027981,TAI KA HEI,戴嘉希
+W23047,2025,P3,3A,19,S9047214,TAM KA YING,譚嘉瑩
+W23019,2025,P3,3A,20,S9014529,TO CHEUK WING,杜卓穎
+W23020,2025,P3,3A,21,S9034376,WONG TSZ YAU,王梓悠
+W23050,2025,P3,3A,22,S8977536,WONG CHUN HEI,黃俊熙
+W23149,2025,P3,3A,23,S9369068,WONG NGA LAM,黃雅琳
+W23021,2025,P3,3A,24,S9024044,YEUNG TSZ YUET,楊子悅
+W23022,2025,P3,3A,25,S9024036,ZHOU HAOYU,周浩宇
+W23086,2025,P3,3B,1,S9043324,CHAU YUK KIU,周鈺翹
+W23025,2025,P3,3B,2,S9042263,CHENG KA SHING,鄭嘉誠
+W23088,2025,P3,3B,3,S9050071,CHEUNG YIN TING,張賢廷
+W23004,2025,P3,3B,4,S9044959,FONG MAN HEI,方雯晞
+W23091,2025,P3,3B,5,S9034228,HO YU KI,何宇淇
+W23093,2025,P3,3B,6,S9065360,KO KWAN NGAI,高鈞毅
+W23008,2025,P3,3B,7,S9029968,KWOK TSZ YING,郭梓盈
+W23094,2025,P3,3B,8,S9061004,LAM YUET NAM,林悅楠
+W23032,2025,P3,3B,9,S9014499,LAU YAN TUNG,劉恩彤
+W23034,2025,P3,3B,10,S9011708,LEE CHUN YIN,李俊賢
+W23036,2025,P3,3B,11,S9024079,LEUNG CHUN SING,梁振聲
+W23038,2025,P3,3B,12,S9029933,LEUNG KA KI,梁嘉麒
+W23015,2025,P3,3B,13,S9044932,LEUNG WING CHIN,梁詠展
+W23041,2025,P3,3B,14,S8977528,LI SUM YAU,李芯悠
+W23099,2025,P3,3B,15,S9035089,LIU CHAK TO,廖澤滔
+W23062,2025,P3,3B,16,S9148452,LUI HOI YAU,雷凱悠
+W23102,2025,P3,3B,17,S9034295,MAN CHAK SING,文澤承
+W23016,2025,P3,3B,18,S9044398,NG KA YEE,吳嘉怡
+W23067,2025,P3,3B,19,S9044436,PANG CHIT LONG,彭哲朗
+W23103,2025,P3,3B,20,S9044355,SIU TSZ KI,蕭芷淇
+W23048,2025,P3,3B,21,S9011686,TSANG CHUN HEI,曾進希
+W23049,2025,P3,3B,22,S9042212,WAN PAK KIU,溫柏翹
+W23105,2025,P3,3B,23,S9042271,WONG HO TIN,黃浩天
+W23106,2025,P3,3B,24,S9037499,WONG YAN TING,黃欣婷
+W23107,2025,P3,3B,25,S9037480,XIE TSZ LAM,謝芷琳
+W23026,2025,P3,3C,1,S9018656,CHAN CHUN YIN,陳俊賢
+W23121,2025,P3,3C,2,S9205103,CHENG SUM YUET,鄭心悅
+W23028,2025,P3,3C,3,S9014561,CHIU CHUN KIT,趙俊傑
+W23090,2025,P3,3C,4,S9044991,FAN CHEUK KAN,范卓勤
+W23006,2025,P3,3C,5,S9044924,IP TIN LONG,葉天朗
+W23131,2025,P3,3C,6,S9221168,KEUNG YAN TUNG,姜欣彤
+W23132,2025,P3,3C,7,S9231457,KWOK KWAN LAM,郭君臨
+W23009,2025,P3,3C,8,S9029951,KWONG TSZ KIU,鄺芷蕎
+W23031,2025,P3,3C,9,S9014545,LAU TIN LONG,劉天朗
+W23033,2025,P3,3C,10,S9011708,LAW CHUN CHING,羅俊政
+W23035,2025,P3,3C,11,S9024087,LEE HOI CHING,李海晴
+W23037,2025,P3,3C,12,S9029941,LEE TSZ LAM,李芷琳
+W23039,2025,P3,3C,13,S9035097,LI CHEUK HEI,李卓熹
+W23040,2025,P3,3C,14,S8977501,LIU TSZ CHUNG,廖梓聰
+W23137,2025,P3,3C,15,S9255011,LUK CHI YEUNG,陸志揚
+W23043,2025,P3,3C,16,S8986519,MA SHU SUM,馬樹森
+W23044,2025,P3,3C,17,S8987760,MAK KA PO,麥嘉寶
+W23045,2025,P3,3C,18,S8987779,MIAO HO FUNG,繆浩峰
+W23138,2025,P3,3C,19,S9255021,MUI TSZ TO,梅子滔
+W23066,2025,P3,3C,20,S9037430,NGAN WING KEI,顏詠琪
+W23143,2025,P3,3C,21,S9318854,SIN CHEUK LAM,冼卓琳
+W23051,2025,P3,3C,22,S8979148,WONG HEI NAM,黃希楠
+W23052,2025,P3,3C,23,S9037499,WONG YAN TING,黃欣婷
+W23108,2025,P3,3C,24,S9043286,YU CHUN HEI,余俊希
+W23109,2025,P3,3C,25,S9043294,ZHAO YAN LONG,趙言朗
+W23110,2025,P3,3D,1,S9042220,AU-YEUNG SUM YUET,歐陽心悅
+W23001,2025,P3,3D,2,S9018672,CHAN CHUN HO,陳俊豪
+W23002,2025,P3,3D,3,S9024052,CHAN CHUN HEI,陳俊熙
+W23085,2025,P3,3D,4,S9029984,CHAN HEI NGAI,陳希毅
+W23111,2025,P3,3D,5,S9037449,CHAN HEI WING,陳晞穎
+W23027,2025,P3,3D,6,S9014537,CHEN JIAYING,陳嘉盈
+W23122,2025,P3,3D,7,S9205111,CHENG TAI MING,鄭泰明
+W23124,2025,P3,3D,8,S9198328,CHEUNG KWAN TO,張鈞陶
+W23003,2025,P3,3D,9,S9014510,CHOW KA KEI,周嘉琪
+W23089,2025,P3,3D,10,S9043308,CHOW SZE CHAI,周斯齊
+W23127,2025,P3,3D,11,S9205146,CHU CHI HIN,朱智軒
+W23092,2025,P3,3D,12,S9034899,HU YUANQI,胡圓棋
+W23095,2025,P3,3D,13,S9018664,LAM CHAK HANG,林澤衡
+W23096,2025,P3,3D,14,S9043316,LAM HOI LAM,林鎧琳
+W23029,2025,P3,3D,15,S8979105,LAU CHUN YIN,劉俊言
+W23097,2025,P3,3D,16,S9065352,LEE CHING HEI,李政熙
+W23098,2025,P3,3D,17,S9044940,LEUNG WAI HIN,梁偉軒
+W23101,2025,P3,3D,18,S9034252,LI KA LOK,李嘉樂
+W23071,2025,P3,3D,19,S8987728,MAN HEI YUI,文希睿
+W23023,2025,P3,3D,20,41903298,MARK HO LAM,麥可琳
 `;
 
 const App = () => {
@@ -426,16 +553,23 @@ const App = () => {
   const [netPwd, setNetPwd] = useState('');
   const [selectedShop, setSelectedShop] = useState(null); 
 
-  // Data Parsing (Updated for Number. Name)
+  // Data Parsing (Fixed for user's CSV format)
   const allStudents = useMemo(() => {
+    // RAW_CSV_DATA should contain the pasted content from "StuInfo_All(3A,3B,3C,3D).csv"
+    // Format: ... Class(Col 3), Num(Col 4), ... EngName(Col 6), ChiName(Col 7) ...
     const lines = RAW_CSV_DATA.trim().split('\n').slice(1);
     return lines.map(line => {
+      // Split by comma, handling potential quotes if necessary (simple split for now)
       const p = line.split(',');
-      const cls = p[3];
-      const num = parseInt(p[4]); // Extract class number
-      const name_zh = p[7];
-      const name_en = p[6];
-      // ID unique key
+      if (p.length < 8) return null; // Skip invalid lines
+
+      const cls = p[3]?.trim();     // Column D -> Index 3
+      const num = parseInt(p[4]?.trim()); // Column E -> Index 4
+      const name_zh = p[7]?.trim(); // Column H -> Index 7
+      const name_en = p[6]?.trim(); // Column G -> Index 6
+
+      if (!cls || !name_zh) return null;
+
       return { 
         class: cls, 
         number: num, 
@@ -443,7 +577,7 @@ const App = () => {
         name_en: name_en, 
         id: `${cls}_${num}` 
       };
-    });
+    }).filter(Boolean); // Remove nulls
   }, []);
 
   const studentsByClass = useMemo(() => {
@@ -869,7 +1003,7 @@ const App = () => {
       <ConnectionStatus/>
       <div className="text-center">
         <Coins size={80} className="text-orange-500 mx-auto animate-bounce mb-4"/>
-        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.3</h1>
+        <h1 className="text-5xl font-black text-slate-800">P.3 理財數學王 v6.9</h1>
         <p className="text-xl text-slate-500 font-bold">5分鐘限時挑戰 • 累積財富</p>
       </div>
       <div className="grid grid-cols-3 gap-8 w-[95vw] max-w-7xl">
